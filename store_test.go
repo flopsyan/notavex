@@ -16,7 +16,7 @@ func newTestStore(t *testing.T) *Store {
 
 func TestCreateExtractsTags(t *testing.T) {
 	s := newTestStore(t)
-	m, err := s.Create("Hello #World and #Go/lang, visit https://example.com#frag")
+	m, err := s.Create("Hello #World and #Go/lang, visit https://example.com#frag", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,14 +36,14 @@ func TestCreateExtractsTags(t *testing.T) {
 
 func TestCreateRejectsEmpty(t *testing.T) {
 	s := newTestStore(t)
-	if _, err := s.Create("   \n\t "); err == nil {
+	if _, err := s.Create("   \n\t ", ""); err == nil {
 		t.Error("expected error for blank content")
 	}
 }
 
 func TestUpdate(t *testing.T) {
 	s := newTestStore(t)
-	m, _ := s.Create("first #a")
+	m, _ := s.Create("first #a", "")
 	upd, err := s.Update(m.ID, "second #b #c")
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestUpdate(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	s := newTestStore(t)
-	m, _ := s.Create("bye")
+	m, _ := s.Create("bye", "")
 	if err := s.Delete(m.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +78,9 @@ func TestDelete(t *testing.T) {
 
 func TestListFilterAndSort(t *testing.T) {
 	s := newTestStore(t)
-	s.Create("apple #fruit")
-	s.Create("banana #fruit")
-	s.Create("carrot #veg")
+	s.Create("apple #fruit", "")
+	s.Create("banana #fruit", "")
+	s.Create("carrot #veg", "")
 
 	if res := s.List(ListOptions{Tag: "fruit"}); res.Total != 2 {
 		t.Errorf("tag filter total = %d, want 2", res.Total)
@@ -95,8 +95,8 @@ func TestListFilterAndSort(t *testing.T) {
 
 func TestPinSortsFirst(t *testing.T) {
 	s := newTestStore(t)
-	first, _ := s.Create("first")
-	s.Create("second")
+	first, _ := s.Create("first", "")
+	s.Create("second", "")
 	if _, err := s.SetPinned(first.ID, true); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestPinSortsFirst(t *testing.T) {
 func TestPagination(t *testing.T) {
 	s := newTestStore(t)
 	for i := 0; i < 5; i++ {
-		s.Create("note")
+		s.Create("note", "")
 	}
 	if res := s.List(ListOptions{Limit: 2, Offset: 0}); len(res.Memos) != 2 || res.Total != 5 {
 		t.Errorf("page 1: got %d items, total %d", len(res.Memos), res.Total)
@@ -124,8 +124,8 @@ func TestPagination(t *testing.T) {
 
 func TestTagsCount(t *testing.T) {
 	s := newTestStore(t)
-	s.Create("a #common #rare")
-	s.Create("b #common")
+	s.Create("a #common #rare", "")
+	s.Create("b #common", "")
 	tags := s.Tags()
 	if len(tags) != 2 {
 		t.Fatalf("tags = %+v", tags)
@@ -141,7 +141,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.Create("persist me #x")
+	s1.Create("persist me #x", "")
 
 	s2, err := NewStore(path)
 	if err != nil {
@@ -150,7 +150,28 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if res := s2.List(ListOptions{}); res.Total != 1 || res.Memos[0].Content != "persist me #x" {
 		t.Errorf("not persisted: %+v", res)
 	}
-	if m, _ := s2.Create("next"); m.ID != 2 {
+	if m, _ := s2.Create("next", ""); m.ID != 2 {
 		t.Errorf("nextID not restored: got %d, want 2", m.ID)
+	}
+}
+
+func TestCreateAndSetColor(t *testing.T) {
+	s := newTestStore(t)
+	m, err := s.Create("a colored note", "mint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Color != "mint" {
+		t.Errorf("create color = %q, want mint", m.Color)
+	}
+	upd, err := s.SetColor(m.ID, "coral")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upd.Color != "coral" {
+		t.Errorf("set color = %q, want coral", upd.Color)
+	}
+	if _, err := s.SetColor(999, "mint"); err != ErrNotFound {
+		t.Errorf("set color on missing: want ErrNotFound, got %v", err)
 	}
 }

@@ -1,8 +1,10 @@
 # 📝 Jot
 
 A tiny, self-hosted notes app with Markdown support — your own private stream of
-thoughts, tasks and snippets. Inspired by [Memos](https://github.com/usememos/memos),
-built to be dead-simple to run and to hack on.
+thoughts, tasks and snippets. A **Google Keep-style** board (masonry grid of
+colorful cards) with the Markdown power of
+[Memos](https://github.com/usememos/memos), built to be dead-simple to run and
+to hack on.
 
 - **Single static binary** — written in Go using *only the standard library*.
   No database server, no Node build step, no external services.
@@ -12,8 +14,8 @@ built to be dead-simple to run and to hack on.
   search instantly.
 - **Tiny footprint** — the Docker image is a few MB and runs happily on a
   Raspberry Pi (`amd64` / `arm64` / `armv7`).
-- **Nice to use** — optional password login, dark mode, pinning, live preview,
-  and `Ctrl/⌘ + Enter` to save.
+- **Keep-style UI** — a responsive masonry grid of cards, an expanding composer,
+  note **colors**, pinning, labels, dark mode, and `Ctrl/⌘ + Enter` to save.
 
 ## Quick start
 
@@ -131,12 +133,13 @@ cookie obtained from `POST /api/login`.
 | Method   | Path                  | Description                          |
 |----------|-----------------------|--------------------------------------|
 | `GET`    | `/api/memos`          | List notes (`?q=`, `?tag=`, `?limit=`, `?offset=`). |
-| `POST`   | `/api/memos`          | Create a note (`{"content": "..."}`). |
-| `GET`    | `/api/memos/{id}`     | Fetch one note.                      |
-| `PUT`    | `/api/memos/{id}`     | Update a note's content.             |
-| `DELETE` | `/api/memos/{id}`     | Delete a note.                       |
-| `POST`   | `/api/memos/{id}/pin` | Pin/unpin (`{"pinned": true}`).      |
-| `GET`    | `/api/tags`           | Tags with usage counts.              |
+| `POST`   | `/api/memos`            | Create a note (`{"content": "...", "color": "mint"}`; `color` optional). |
+| `GET`    | `/api/memos/{id}`       | Fetch one note.                      |
+| `PUT`    | `/api/memos/{id}`       | Update a note's content.             |
+| `DELETE` | `/api/memos/{id}`       | Delete a note.                       |
+| `POST`   | `/api/memos/{id}/pin`   | Pin/unpin (`{"pinned": true}`).      |
+| `POST`   | `/api/memos/{id}/color` | Set color (`{"color": "mint"}`; `""` = default). |
+| `GET`    | `/api/tags`             | Tags with usage counts.              |
 | `GET`    | `/api/stats`          | `{ "memos": N, "tags": M }`.         |
 
 ## License

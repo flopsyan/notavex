@@ -22,6 +22,7 @@ type Memo struct {
 	Content   string    `json:"content"`
 	Tags      []string  `json:"tags"`
 	Pinned    bool      `json:"pinned"`
+	Color     string    `json:"color"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -154,7 +155,7 @@ func cloneMemo(m *Memo) *Memo {
 }
 
 // Create stores a new memo and returns it.
-func (s *Store) Create(content string) (*Memo, error) {
+func (s *Store) Create(content, color string) (*Memo, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, errors.New("content must not be empty")
@@ -168,6 +169,7 @@ func (s *Store) Create(content string) (*Memo, error) {
 		ID:        s.nextID,
 		Content:   content,
 		Tags:      extractTags(content),
+		Color:     color,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -222,6 +224,25 @@ func (s *Store) SetPinned(id int64, pinned bool) (*Memo, error) {
 
 	if err := s.save(); err != nil {
 		m.Pinned = prev
+		return nil, err
+	}
+	return cloneMemo(m), nil
+}
+
+// SetColor changes a memo's color label. Color does not change UpdatedAt.
+func (s *Store) SetColor(id int64, color string) (*Memo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.memos[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	prev := m.Color
+	m.Color = color
+
+	if err := s.save(); err != nil {
+		m.Color = prev
 		return nil, err
 	}
 	return cloneMemo(m), nil

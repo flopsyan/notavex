@@ -10,9 +10,10 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="nav-toggle" class="icon-btn" aria-label="Toggle menu">☰</button>
     <div class="brand"><span class="logo">📝</span> Jot</div>
     <div class="search">
-      <input id="search" type="search" placeholder="Search notes…" autocomplete="off" spellcheck="false">
+      <input id="search" type="search" placeholder="Search your notes" autocomplete="off" spellcheck="false">
     </div>
     <div class="topbar-actions">
       <button id="theme-toggle" class="icon-btn" title="Toggle light/dark theme" aria-label="Toggle theme">◑</button>
@@ -20,42 +21,45 @@
     </div>
   </header>
 
-  <main class="layout">
-    <section class="content">
-      <form id="composer" class="composer">
-        <textarea id="editor" rows="3" placeholder="What's on your mind? Markdown &amp; #tags are supported…"></textarea>
-        <div class="composer-bar">
-          <button type="button" id="preview-toggle" class="ghost">Preview</button>
-          <span class="hint">Ctrl/⌘ + Enter to save</span>
-          <span class="spacer"></span>
-          <button type="submit" id="save-btn">Save</button>
+  <div class="app">
+    <aside id="sidebar" class="sidebar">
+      <button id="nav-all" class="nav-item active" data-tag="">
+        <span class="nav-ico">🗒️</span><span class="nav-text">Notes</span>
+      </button>
+      <div class="nav-section">Labels</div>
+      <div id="label-list" class="label-list"></div>
+    </aside>
+
+    <main class="main">
+      <form id="composer" class="composer collapsed" autocomplete="off">
+        <input id="composer-collapsed" class="composer-collapsed" placeholder="Take a note…" readonly>
+        <div class="composer-expanded">
+          <textarea id="editor" rows="3" placeholder="Take a note…  (Markdown &amp; #tags supported)"></textarea>
+          <div id="composer-preview" class="preview markdown" hidden></div>
+          <div class="composer-toolbar">
+            <div id="composer-colors" class="color-dots"></div>
+            <button type="button" id="composer-preview-btn" class="ghost">Preview</button>
+            <span class="spacer"></span>
+            <button type="button" id="composer-close" class="text-btn">Close</button>
+          </div>
         </div>
-        <div id="preview" class="preview markdown" hidden></div>
       </form>
 
-      <div id="filter-bar" class="filter-bar" hidden>
-        <span>Showing</span>
-        <span id="filter-chip" class="chip"></span>
-        <button id="clear-filter" class="link" type="button">clear</button>
-      </div>
+      <section id="pinned-section" class="grid-section" hidden>
+        <h2 class="section-label">Pinned</h2>
+        <div id="pinned-grid" class="masonry"></div>
+      </section>
 
-      <div id="memo-list" class="memo-list" aria-live="polite"></div>
+      <section id="others-section" class="grid-section">
+        <h2 id="others-label" class="section-label" hidden>Others</h2>
+        <div id="others-grid" class="masonry"></div>
+      </section>
+
       <p id="empty" class="empty" hidden></p>
-      <button id="load-more" class="load-more" type="button" hidden>Load more</button>
-    </section>
+    </main>
+  </div>
 
-    <aside class="sidebar">
-      <div id="stats" class="stats"></div>
-      <div class="tags-box">
-        <h3>Tags</h3>
-        <div id="tag-cloud" class="tag-cloud"><span class="muted">No tags yet</span></div>
-      </div>
-      <footer class="sidebar-footer">
-        <a href="https://github.com/flopsyan/jot" target="_blank" rel="noopener">Jot</a> · self-hosted notes
-      </footer>
-    </aside>
-  </main>
-
+  <div id="scrim" class="scrim"></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

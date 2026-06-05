@@ -1,23 +1,52 @@
 'use strict';
 
 // ===================================================================
-// Jot — single-page notes UI
+// Jot — Google Keep-style notes UI
 // ===================================================================
 
-const PAGE_SIZE = 20;
+const COLORS = [
+  { name: '', label: 'Default' },
+  { name: 'coral', label: 'Coral' },
+  { name: 'peach', label: 'Peach' },
+  { name: 'sand', label: 'Sand' },
+  { name: 'mint', label: 'Mint' },
+  { name: 'sage', label: 'Sage' },
+  { name: 'fog', label: 'Fog' },
+  { name: 'storm', label: 'Storm' },
+  { name: 'dusk', label: 'Dusk' },
+  { name: 'blossom', label: 'Blossom' },
+  { name: 'clay', label: 'Clay' },
+  { name: 'chalk', label: 'Chalk' },
+];
 
-const state = {
-  authEnabled: false,
-  query: '',
-  tag: '',
-  memos: [],
-  offset: 0,
-  total: 0,
-};
+const state = { authEnabled: false, all: [], query: '', tag: '' };
+let composerColor = '';
+let grids = []; // [{ container, cards }] — kept so we can re-layout on resize
 
-// ---------- tiny helpers ----------
+// ---------- DOM refs ----------
+const $ = (s) => document.querySelector(s);
+const searchInput = $('#search');
+const themeToggle = $('#theme-toggle');
+const logoutBtn = $('#logout');
+const navToggle = $('#nav-toggle');
+const sidebar = $('#sidebar');
+const scrim = $('#scrim');
+const navAll = $('#nav-all');
+const labelList = $('#label-list');
+const composer = $('#composer');
+const composerCollapsed = $('#composer-collapsed');
+const editor = $('#editor');
+const composerColorsEl = $('#composer-colors');
+const composerPreviewBtn = $('#composer-preview-btn');
+const composerCloseBtn = $('#composer-close');
+const composerPreviewBox = $('#composer-preview');
+const pinnedSection = $('#pinned-section');
+const pinnedGrid = $('#pinned-grid');
+const othersLabel = $('#others-label');
+const othersGrid = $('#others-grid');
+const emptyEl = $('#empty');
 
-const $ = (sel) => document.querySelector(sel);
+// ---------- small helpers ----------
 
 async function api(method, path, body) {
   const opts = { method, headers: {} };
@@ -38,10 +67,7 @@ async function api(method, path, body) {
 
 function debounce(fn, ms) {
   let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
 function formatRelative(iso) {
@@ -60,9 +86,11 @@ function autosize(ta) {
 }
 
 // ===================================================================
-// Markdown rendering (safe: all input is HTML-escaped first, and only a
-// fixed set of tags is emitted; link/image URLs are sanitized).
+// Markdown rendering (safe: all input is HTML-escaped first, only a fixed
+// set of tags is emitted, and link/image URLs are sanitized).
 // ===================================================================
+
+const PH = String.fromCharCode(0); // placeholder sentinel — cannot occur in user input
 
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => (
@@ -73,18 +101,16 @@ function escapeHtml(s) {
 function sanitizeUrl(url) {
   const u = url.trim();
   if (/^(https?:\/\/|mailto:|\/|#|\.\.?\/)/i.test(u)) return u;
-  // Allow relative paths (no scheme); reject javascript:, data:, vbscript:, …
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) return u;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) return u; // relative path (no scheme)
   return '#';
 }
 
 function renderInline(text) {
-  // `text` is already HTML-escaped. Protect inline code spans first so their
-  // contents are not touched by the other transforms.
+  // `text` is already HTML-escaped. Protect inline code spans first.
   const codeSpans = [];
   text = text.replace(/`([^`]+)`/g, (_, c) => {
     codeSpans.push(c);
-    return '\x00C' + (codeSpans.length - 1) + '\x00';
+    return PH + 'c' + (codeSpans.length - 1) + PH;
   });
 
   text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^)]*?)&quot;)?\)/g,
@@ -101,28 +127,27 @@ function renderInline(text) {
   text = text.replace(/(^|[^_\w])_([^_\s][^_]*?)_(?!\w)/g, '$1<em>$2</em>');
   text = text.replace(/~~([^~]+)~~/g, '<del>$1</del>');
 
-  // Highlight #tags so they look clickable in rendered notes.
   text = text.replace(/(^|\s)#([\p{L}\p{N}][\p{L}\p{N}_/-]*)/gu,
     (_, pre, tag) => `${pre}<span class="hashtag" data-tag="${tag.toLowerCase()}">#${tag}</span>`);
 
-  // Autolink bare URLs (those not already inside a markdown link).
   text = text.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
     (_, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
 
-  return text.replace(/\x00C(\d+)\x00/g, (_, i) => `<code>${codeSpans[+i]}</code>`);
+  const restore = new RegExp(PH + 'c(\\d+)' + PH, 'g');
+  return text.replace(restore, (_, i) => `<code>${codeSpans[+i]}</code>`);
 }
 
 function renderMarkdown(src) {
   if (!src) return '';
   src = src.replace(/\r\n?/g, '\n');
 
-  // Pull fenced code blocks out first so their contents are left verbatim.
   const blocks = [];
   src = src.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, code) => {
     blocks.push(`<pre><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`);
-    return '\x00B' + (blocks.length - 1) + '\x00';
+    return PH + 'b' + (blocks.length - 1) + PH;
   });
-  const blockToken = (l) => /^\x00B(\d+)\x00$/.exec(l.trim());
+  const tokenRe = new RegExp('^' + PH + 'b(\\d+)' + PH + '$');
+  const blockToken = (l) => tokenRe.exec(l.trim());
 
   const lines = src.split('\n');
   const isBreak = (l) =>
@@ -140,7 +165,7 @@ function renderMarkdown(src) {
     if (tok) { html += blocks[+tok[1]]; i++; continue; }
     if (line.trim() === '') { i++; continue; }
 
-    let m = line.match(/^(#{1,6})\s+(.*)$/);
+    const m = line.match(/^(#{1,6})\s+(.*)$/);
     if (m) {
       const level = m[1].length;
       html += `<h${level}>${renderInline(escapeHtml(m[2].trim()))}</h${level}>`;
@@ -194,18 +219,18 @@ function renderMarkdown(src) {
     html += `<p>${para.join('<br>')}</p>`;
   }
 
-  return html.replace(/\x00B(\d+)\x00/g, (full, idx) =>
-    blocks[+idx] !== undefined ? blocks[+idx] : full);
+  const restore = new RegExp(PH + 'b(\\d+)' + PH, 'g');
+  return html.replace(restore, (full, idx) => (blocks[+idx] !== undefined ? blocks[+idx] : full));
 }
 
 // ===================================================================
-// Rendering the timeline
+// Notes timeline (masonry)
 // ===================================================================
 
 function iconButton(label, title, onClick) {
   const b = document.createElement('button');
-  b.className = 'icon-btn';
   b.type = 'button';
+  b.className = 'icon-btn';
   b.textContent = label;
   b.title = title;
   b.setAttribute('aria-label', title);
@@ -213,115 +238,147 @@ function iconButton(label, title, onClick) {
   return b;
 }
 
-function memoCard(m) {
+function noteCard(m) {
   const el = document.createElement('article');
-  el.className = 'memo' + (m.pinned ? ' pinned' : '');
+  el.className = 'note';
   el.dataset.id = m.id;
+  if (m.color) el.dataset.color = m.color;
+
+  const pin = iconButton(m.pinned ? '📌' : '📍', m.pinned ? 'Unpin' : 'Pin', () => togglePin(m));
+  pin.classList.add('note-pin');
+  el.appendChild(pin);
 
   const body = document.createElement('div');
-  body.className = 'markdown';
+  body.className = 'note-body markdown';
   body.innerHTML = renderMarkdown(m.content);
-  body.querySelectorAll('.hashtag').forEach((tagEl) => {
-    tagEl.addEventListener('click', () => filterByTag(tagEl.dataset.tag));
-  });
+  body.querySelectorAll('.hashtag').forEach((t) =>
+    t.addEventListener('click', () => filterByTag(t.dataset.tag)));
   el.appendChild(body);
 
-  const footer = document.createElement('div');
-  footer.className = 'memo-footer';
-
-  const meta = document.createElement('div');
-  meta.className = 'memo-meta';
-  const time = document.createElement('time');
-  time.textContent = formatRelative(m.createdAt);
-  time.dateTime = m.createdAt;
-  time.title = new Date(m.createdAt).toLocaleString();
-  meta.appendChild(time);
-  if (m.updatedAt && m.updatedAt !== m.createdAt) {
-    const edited = document.createElement('span');
-    edited.className = 'edited';
-    edited.textContent = '· edited';
-    edited.title = 'Edited ' + new Date(m.updatedAt).toLocaleString();
-    meta.appendChild(edited);
+  if (m.tags && m.tags.length) {
+    const tags = document.createElement('div');
+    tags.className = 'note-tags';
+    m.tags.forEach((t) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'note-tag';
+      chip.textContent = '#' + t;
+      chip.addEventListener('click', () => filterByTag(t));
+      tags.appendChild(chip);
+    });
+    el.appendChild(tags);
   }
-  footer.appendChild(meta);
 
   const actions = document.createElement('div');
-  actions.className = 'memo-actions';
-  actions.appendChild(iconButton(m.pinned ? '📌' : '📍', m.pinned ? 'Unpin' : 'Pin', () => togglePin(m)));
+  actions.className = 'note-actions';
+
+  const colorBtn = iconButton('🎨', 'Background color', (e) => {
+    e.stopPropagation();
+    const existing = el.querySelector('.color-popover');
+    closeColorPopovers();
+    if (!existing) openColorPopover(el, m);
+  });
+  actions.appendChild(colorBtn);
   actions.appendChild(iconButton('✏️', 'Edit', () => startEdit(el, m)));
   actions.appendChild(iconButton('🗑️', 'Delete', () => removeMemo(m)));
-  footer.appendChild(actions);
 
-  el.appendChild(footer);
+  const time = document.createElement('time');
+  time.className = 'note-time';
+  time.textContent = formatRelative(m.createdAt);
+  time.dateTime = m.createdAt;
+  time.title = new Date(m.createdAt).toLocaleString()
+    + (m.updatedAt && m.updatedAt !== m.createdAt ? '  ·  edited ' + new Date(m.updatedAt).toLocaleString() : '');
+  actions.appendChild(time);
+
+  el.appendChild(actions);
   return el;
 }
 
-function renderList() {
-  const list = $('#memo-list');
-  list.innerHTML = '';
-  state.memos.forEach((m) => list.appendChild(memoCard(m)));
+function openColorPopover(cardEl, m) {
+  const pop = document.createElement('div');
+  pop.className = 'color-popover';
+  COLORS.forEach((c) => {
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'swatch' + (c.name === '' ? ' is-default' : '') + ((m.color || '') === c.name ? ' is-selected' : '');
+    if (c.name) sw.dataset.color = c.name;
+    sw.title = c.label;
+    sw.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeColorPopovers();
+      setColor(m, c.name);
+    });
+    pop.appendChild(sw);
+  });
+  cardEl.appendChild(pop);
+}
 
-  const empty = $('#empty');
-  if (state.memos.length === 0) {
-    empty.hidden = false;
-    empty.textContent = state.query || state.tag
-      ? 'No notes match your filter.'
-      : 'No notes yet. Write your first one above ✍️';
-  } else {
-    empty.hidden = true;
+function closeColorPopovers() {
+  document.querySelectorAll('.color-popover').forEach((p) => p.remove());
+}
+
+// Lay cards out into the shortest column (masonry), responsive to width.
+function distribute(container, cards) {
+  const GAP = 14, MIN = 236;
+  const width = container.clientWidth || container.offsetWidth || 1;
+  const n = Math.max(1, Math.min(cards.length || 1, Math.floor((width + GAP) / (MIN + GAP))));
+  container.innerHTML = '';
+  const cols = [], heights = [];
+  for (let k = 0; k < n; k++) {
+    const c = document.createElement('div');
+    c.className = 'masonry-col';
+    container.appendChild(c);
+    cols.push(c);
+    heights.push(0);
   }
-  $('#load-more').hidden = state.memos.length >= state.total;
+  for (const card of cards) {
+    let mi = 0;
+    for (let k = 1; k < n; k++) if (heights[k] < heights[mi]) mi = k;
+    cols[mi].appendChild(card);
+    heights[mi] += card.offsetHeight + GAP;
+  }
 }
 
-function replaceMemo(m) {
-  const idx = state.memos.findIndex((x) => x.id === m.id);
-  if (idx >= 0) state.memos[idx] = m;
-  const old = document.querySelector(`.memo[data-id="${m.id}"]`);
-  if (old) old.replaceWith(memoCard(m));
+function relayoutAll() {
+  grids.forEach((g) => distribute(g.container, g.cards));
 }
 
-// ===================================================================
-// Editing in place
-// ===================================================================
-
-function startEdit(el, m) {
-  el.classList.add('is-editing');
-  el.innerHTML = '';
-
-  const ta = document.createElement('textarea');
-  ta.className = 'edit-area';
-  ta.value = m.content;
-
-  const bar = document.createElement('div');
-  bar.className = 'edit-bar';
-  const save = document.createElement('button');
-  save.type = 'button';
-  save.textContent = 'Save';
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.className = 'ghost';
-  cancel.textContent = 'Cancel';
-  bar.append(save, cancel);
-
-  save.addEventListener('click', async () => {
-    const content = ta.value.trim();
-    if (!content) return;
-    try {
-      replaceMemo(await api('PUT', '/memos/' + m.id, { content }));
-      refreshSidebar();
-    } catch (err) { alert(err.message); }
-  });
-  cancel.addEventListener('click', () => replaceMemo(m));
-  ta.addEventListener('input', () => autosize(ta));
-  ta.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); save.click(); }
-    if (e.key === 'Escape') { e.preventDefault(); cancel.click(); }
+function render() {
+  const q = state.query.toLowerCase();
+  const filtered = state.all.filter((m) => {
+    if (state.tag && !(m.tags || []).includes(state.tag)) return false;
+    if (q && !m.content.toLowerCase().includes(q)) return false;
+    return true;
   });
 
-  el.append(ta, bar);
-  autosize(ta);
-  ta.focus();
-  ta.setSelectionRange(ta.value.length, ta.value.length);
+  const byNewest = (a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.id - a.id);
+  const pinned = filtered.filter((m) => m.pinned).sort(byNewest);
+  const others = filtered.filter((m) => !m.pinned).sort(byNewest);
+
+  pinnedSection.hidden = pinned.length === 0;
+  othersLabel.hidden = !(pinned.length > 0 && others.length > 0);
+
+  grids = [
+    { container: pinnedGrid, cards: pinned.map(noteCard) },
+    { container: othersGrid, cards: others.map(noteCard) },
+  ];
+  relayoutAll();
+
+  emptyEl.hidden = filtered.length !== 0;
+  if (filtered.length === 0) {
+    emptyEl.textContent = state.all.length === 0
+      ? 'Notes you add appear here.'
+      : 'No matching notes.';
+  }
+}
+
+function rebuildCard(m) {
+  const old = document.querySelector(`.note[data-id="${m.id}"]`);
+  if (!old) { render(); return; }
+  const fresh = noteCard(m);
+  old.replaceWith(fresh);
+  grids.forEach((g) => { const i = g.cards.indexOf(old); if (i >= 0) g.cards[i] = fresh; });
+  relayoutAll();
 }
 
 // ===================================================================
@@ -330,8 +387,23 @@ function startEdit(el, m) {
 
 async function togglePin(m) {
   try {
-    await api('POST', `/memos/${m.id}/pin`, { pinned: !m.pinned });
-    await loadMemos(true); // re-sort (pinned float to the top)
+    const upd = await api('POST', `/memos/${m.id}/pin`, { pinned: !m.pinned });
+    const i = state.all.findIndex((x) => x.id === m.id);
+    if (i >= 0) state.all[i] = upd;
+    render();
+  } catch (err) { alert(err.message); }
+}
+
+async function setColor(m, color) {
+  try {
+    const upd = await api('POST', `/memos/${m.id}/color`, { color });
+    const i = state.all.findIndex((x) => x.id === m.id);
+    if (i >= 0) state.all[i] = upd;
+    const el = document.querySelector(`.note[data-id="${m.id}"]`);
+    if (el) {
+      if (upd.color) el.dataset.color = upd.color; else delete el.dataset.color;
+    }
+    relayoutAll();
   } catch (err) { alert(err.message); }
 }
 
@@ -339,111 +411,143 @@ async function removeMemo(m) {
   if (!confirm('Delete this note? This cannot be undone.')) return;
   try {
     await api('DELETE', '/memos/' + m.id);
-    state.memos = state.memos.filter((x) => x.id !== m.id);
-    state.total = Math.max(0, state.total - 1);
-    document.querySelector(`.memo[data-id="${m.id}"]`)?.remove();
-    renderList();
-    refreshSidebar();
+    state.all = state.all.filter((x) => x.id !== m.id);
+    render();
+    renderLabels();
   } catch (err) { alert(err.message); }
 }
 
-async function createMemo(content) {
-  await api('POST', '/memos', { content });
-  await loadMemos(true);
-  refreshSidebar();
-}
+function startEdit(cardEl, m) {
+  closeColorPopovers();
+  cardEl.classList.add('is-editing');
+  cardEl.innerHTML = '';
 
-// ===================================================================
-// Loading + filtering
-// ===================================================================
+  const ta = document.createElement('textarea');
+  ta.className = 'note-edit';
+  ta.value = m.content;
+  const bar = document.createElement('div');
+  bar.className = 'note-edit-bar';
+  const done = document.createElement('button');
+  done.type = 'button';
+  done.className = 'text-btn';
+  done.textContent = 'Done';
+  bar.appendChild(done);
+  cardEl.append(ta, bar);
+  autosize(ta);
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
 
-async function loadMemos(reset = true) {
-  if (reset) state.offset = 0;
-  const params = new URLSearchParams();
-  if (state.query) params.set('q', state.query);
-  if (state.tag) params.set('tag', state.tag);
-  params.set('limit', PAGE_SIZE);
-  params.set('offset', state.offset);
-
-  const res = await api('GET', '/memos?' + params.toString());
-  state.memos = reset ? res.memos : state.memos.concat(res.memos);
-  state.total = res.total;
-  state.offset = state.memos.length;
-  renderList();
-}
-
-function updateFilterBar() {
-  const bar = $('#filter-bar');
-  const chip = $('#filter-chip');
-  if (state.tag) {
-    bar.hidden = false;
-    chip.textContent = '#' + state.tag;
-  } else if (state.query) {
-    bar.hidden = false;
-    chip.textContent = `“${state.query}”`;
-  } else {
-    bar.hidden = true;
-  }
-  document.querySelectorAll('#tag-cloud .tag').forEach((t) => {
-    t.classList.toggle('active', t.dataset.tag === state.tag);
+  const commit = async () => {
+    const content = ta.value.trim();
+    if (!content || content === m.content) { rebuildCard(m); return; }
+    try {
+      const upd = await api('PUT', '/memos/' + m.id, { content });
+      const i = state.all.findIndex((x) => x.id === m.id);
+      if (i >= 0) state.all[i] = upd;
+      rebuildCard(upd);
+      renderLabels();
+    } catch (err) { alert(err.message); }
+  };
+  done.addEventListener('click', commit);
+  ta.addEventListener('input', () => autosize(ta));
+  ta.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); rebuildCard(m); }
   });
+}
+
+// ===================================================================
+// Filtering + labels
+// ===================================================================
+
+function renderLabels() {
+  const counts = new Map();
+  state.all.forEach((m) => (m.tags || []).forEach((t) => counts.set(t, (counts.get(t) || 0) + 1)));
+  const tags = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+  labelList.innerHTML = '';
+  if (tags.length === 0) {
+    labelList.innerHTML = '<div class="nav-empty">No labels yet</div>';
+  } else {
+    tags.forEach(([name, count]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'nav-item' + (state.tag === name ? ' active' : '');
+      b.dataset.tag = name;
+      b.innerHTML = `<span class="nav-ico">🏷️</span><span class="nav-text">${escapeHtml(name)}</span><span class="nav-count">${count}</span>`;
+      b.addEventListener('click', () => filterByTag(name));
+      labelList.appendChild(b);
+    });
+  }
+  navAll.classList.toggle('active', state.tag === '');
 }
 
 function filterByTag(tag) {
   state.tag = state.tag === tag ? '' : tag;
   state.query = '';
-  $('#search').value = '';
-  updateFilterBar();
-  loadMemos(true);
+  searchInput.value = '';
+  closeSidebar();
+  render();
+  renderLabels();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function clearFilter() {
-  state.tag = '';
-  state.query = '';
-  $('#search').value = '';
-  updateFilterBar();
-  loadMemos(true);
+// ===================================================================
+// Composer
+// ===================================================================
+
+function expandComposer() {
+  if (!composer.classList.contains('collapsed')) return;
+  composer.classList.remove('collapsed');
+  renderComposerColors();
+  editor.focus();
 }
 
-async function refreshSidebar() {
-  try {
-    const [stats, tags] = await Promise.all([
-      api('GET', '/stats'),
-      api('GET', '/tags'),
-    ]);
-    $('#stats').innerHTML =
-      `<span><strong>${stats.memos}</strong> notes</span><span><strong>${stats.tags}</strong> tags</span>`;
+function renderComposerColors() {
+  composerColorsEl.innerHTML = '';
+  COLORS.forEach((c) => {
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'swatch' + (c.name === '' ? ' is-default' : '') + (composerColor === c.name ? ' is-selected' : '');
+    if (c.name) sw.dataset.color = c.name;
+    sw.title = c.label;
+    sw.addEventListener('click', (e) => {
+      e.preventDefault();
+      composerColor = c.name;
+      if (c.name) composer.dataset.color = c.name; else delete composer.dataset.color;
+      renderComposerColors();
+    });
+    composerColorsEl.appendChild(sw);
+  });
+}
 
-    const cloud = $('#tag-cloud');
-    if (!tags.length) {
-      cloud.innerHTML = '<span class="muted">No tags yet</span>';
-    } else {
-      cloud.innerHTML = '';
-      tags.forEach((t) => {
-        const b = document.createElement('button');
-        b.className = 'tag';
-        b.type = 'button';
-        b.dataset.tag = t.name;
-        b.innerHTML = `#${t.name}<span class="tag-count">${t.count}</span>`;
-        b.addEventListener('click', () => filterByTag(t.name));
-        cloud.appendChild(b);
-      });
-    }
-    updateFilterBar();
-  } catch (err) { /* sidebar is non-critical */ }
+async function commitComposer() {
+  const content = editor.value.trim();
+  composer.classList.add('collapsed');
+  composerPreviewBox.hidden = true;
+  editor.hidden = false;
+  composerPreviewBtn.textContent = 'Preview';
+  if (content) {
+    try {
+      const m = await api('POST', '/memos', { content, color: composerColor });
+      state.all.unshift(m);
+      render();
+      renderLabels();
+    } catch (err) { alert(err.message); }
+  }
+  editor.value = '';
+  autosize(editor);
+  composerColor = '';
+  delete composer.dataset.color;
 }
 
 // ===================================================================
-// Theme
+// Theme + sidebar
 // ===================================================================
 
 function applyTheme(theme) {
-  if (theme === 'light' || theme === 'dark') {
-    document.documentElement.dataset.theme = theme;
-  } else {
-    delete document.documentElement.dataset.theme;
-  }
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
 }
 
 function toggleTheme() {
@@ -454,78 +558,84 @@ function toggleTheme() {
   applyTheme(next);
 }
 
+function closeSidebar() { document.body.classList.remove('sidebar-open'); }
+
 // ===================================================================
-// Wiring
+// Init
 // ===================================================================
-
-function setupComposer() {
-  const form = $('#composer');
-  const editor = $('#editor');
-  const preview = $('#preview');
-  const previewToggle = $('#preview-toggle');
-
-  editor.addEventListener('input', () => autosize(editor));
-
-  previewToggle.addEventListener('click', () => {
-    const show = preview.hidden;
-    preview.hidden = !show;
-    editor.hidden = show;
-    previewToggle.textContent = show ? 'Edit' : 'Preview';
-    if (show) preview.innerHTML = renderMarkdown(editor.value) || '<p class="muted">Nothing to preview.</p>';
-  });
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const content = editor.value.trim();
-    if (!content) return;
-    try {
-      await createMemo(content);
-      editor.value = '';
-      autosize(editor);
-      preview.hidden = true;
-      editor.hidden = false;
-      previewToggle.textContent = 'Preview';
-      editor.focus();
-    } catch (err) { alert(err.message); }
-  });
-
-  editor.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault();
-      form.requestSubmit();
-    }
-  });
-}
 
 async function init() {
   applyTheme(localStorage.getItem('jot-theme'));
-  $('#theme-toggle').addEventListener('click', toggleTheme);
+  themeToggle.addEventListener('click', toggleTheme);
+
+  navToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.body.classList.toggle('sidebar-open');
+  });
+  scrim.addEventListener('click', closeSidebar);
+  navAll.addEventListener('click', () => {
+    state.tag = '';
+    state.query = '';
+    searchInput.value = '';
+    closeSidebar();
+    render();
+    renderLabels();
+  });
+
+  composerCollapsed.addEventListener('click', expandComposer);
+  composerCollapsed.addEventListener('focus', expandComposer);
+  composerCloseBtn.addEventListener('click', commitComposer);
+  composer.addEventListener('submit', (e) => { e.preventDefault(); commitComposer(); });
+  editor.addEventListener('input', () => autosize(editor));
+  editor.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); commitComposer(); }
+    if (e.key === 'Escape') { e.preventDefault(); editor.value = ''; commitComposer(); }
+  });
+  composerPreviewBtn.addEventListener('click', () => {
+    const show = composerPreviewBox.hidden;
+    composerPreviewBox.hidden = !show;
+    editor.hidden = show;
+    composerPreviewBtn.textContent = show ? 'Edit' : 'Preview';
+    if (show) composerPreviewBox.innerHTML = renderMarkdown(editor.value) || '<p class="muted">Nothing to preview.</p>';
+  });
+
+  searchInput.addEventListener('input', debounce(() => {
+    state.query = searchInput.value.trim();
+    state.tag = '';
+    render();
+    renderLabels();
+  }, 200));
+
+  logoutBtn.addEventListener('click', async () => {
+    try { await api('POST', '/logout'); } catch (err) { /* ignore */ }
+    window.location.href = '/login';
+  });
+
+  // Click-away: commit the composer, close popovers, close the mobile drawer.
+  document.addEventListener('click', (e) => {
+    if (!composer.classList.contains('collapsed') && !composer.contains(e.target)) commitComposer();
+    document.querySelectorAll('.color-popover').forEach((p) => {
+      if (!p.parentElement || !p.parentElement.contains(e.target)) p.remove();
+    });
+    if (document.body.classList.contains('sidebar-open')
+      && !sidebar.contains(e.target) && e.target !== navToggle) closeSidebar();
+  });
+
+  window.addEventListener('resize', debounce(relayoutAll, 150));
 
   try {
     const cfg = await api('GET', '/config');
     state.authEnabled = cfg.authEnabled;
-    $('#logout').hidden = !cfg.authEnabled;
+    logoutBtn.hidden = !cfg.authEnabled;
   } catch (err) { /* ignore */ }
 
-  $('#logout').addEventListener('click', async () => {
-    await api('POST', '/logout');
-    window.location.href = '/login';
-  });
+  try {
+    const res = await api('GET', '/memos');
+    state.all = res.memos || [];
+  } catch (err) { /* ignore */ }
 
-  setupComposer();
-
-  $('#search').addEventListener('input', debounce((e) => {
-    state.query = e.target.value.trim();
-    state.tag = '';
-    updateFilterBar();
-    loadMemos(true);
-  }, 250));
-
-  $('#clear-filter').addEventListener('click', clearFilter);
-  $('#load-more').addEventListener('click', () => loadMemos(false));
-
-  await loadMemos(true);
-  await refreshSidebar();
+  render();
+  renderLabels();
 }
 
 init();

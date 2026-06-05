@@ -93,6 +93,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/memos/{id}", s.requireAuth(s.handleUpdateMemo))
 	mux.HandleFunc("DELETE /api/memos/{id}", s.requireAuth(s.handleDeleteMemo))
 	mux.HandleFunc("POST /api/memos/{id}/pin", s.requireAuth(s.handlePinMemo))
+	mux.HandleFunc("POST /api/memos/{id}/color", s.requireAuth(s.handleSetColor))
 	mux.HandleFunc("GET /api/tags", s.requireAuth(s.handleTags))
 	mux.HandleFunc("GET /api/stats", s.requireAuth(s.handleStats))
 
@@ -250,11 +251,27 @@ func (s *Server) handleListMemos(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateMemo(w http.ResponseWriter, r *http.Request) {
-	content, ok := decodeContent(w, r)
-	if !ok {
+	var req struct {
+		Content string `json:"content"`
+		Color   string `json:"color"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentLen+4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	m, err := s.store.Create(content)
+	if len(req.Content) > maxContentLen {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "content too large")
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		writeJSONError(w, http.StatusBadRequest, "content must not be empty")
+		return
+	}
+	if !validColor(req.Color) {
+		writeJSONError(w, http.StatusBadRequest, "invalid color")
+		return
+	}
+	m, err := s.store.Create(req.Content, req.Color)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -324,6 +341,30 @@ func (s *Server) handlePinMemo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, m)
 }
 
+func (s *Server) handleSetColor(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Color string `json:"color"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !validColor(req.Color) {
+		writeJSONError(w, http.StatusBadRequest, "invalid color")
+		return
+	}
+	m, err := s.store.SetColor(id, req.Color)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
 func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.store.Tags())
 }
@@ -344,6 +385,16 @@ func (s *Server) writeStoreError(w http.ResponseWriter, err error) {
 	}
 	writeJSONError(w, http.StatusBadRequest, err.Error())
 }
+
+// allowedColors is the set of note color labels the UI offers ("" = default).
+// These names map to the pastel palette defined in the stylesheet.
+var allowedColors = map[string]bool{
+	"": true, "coral": true, "peach": true, "sand": true, "mint": true,
+	"sage": true, "fog": true, "storm": true, "dusk": true, "blossom": true,
+	"clay": true, "chalk": true,
+}
+
+func validColor(c string) bool { return allowedColors[c] }
 
 func decodeContent(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var req struct {
