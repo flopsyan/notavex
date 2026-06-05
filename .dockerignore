@@ -1,0 +1,12 @@
+.git
+.gitignore
+.github
+/data
+.env
+*.tmp
+.jot-*.tmp
+.secret
+jot
+README.md
+LICENSE
+Makefile

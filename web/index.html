@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Jot</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">📝</span> Jot</div>
+    <div class="search">
+      <input id="search" type="search" placeholder="Search notes…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="topbar-actions">
+      <button id="theme-toggle" class="icon-btn" title="Toggle light/dark theme" aria-label="Toggle theme">◑</button>
+      <button id="logout" class="icon-btn" title="Log out" aria-label="Log out" hidden>⎋</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="content">
+      <form id="composer" class="composer">
+        <textarea id="editor" rows="3" placeholder="What's on your mind? Markdown &amp; #tags are supported…"></textarea>
+        <div class="composer-bar">
+          <button type="button" id="preview-toggle" class="ghost">Preview</button>
+          <span class="hint">Ctrl/⌘ + Enter to save</span>
+          <span class="spacer"></span>
+          <button type="submit" id="save-btn">Save</button>
+        </div>
+        <div id="preview" class="preview markdown" hidden></div>
+      </form>
+
+      <div id="filter-bar" class="filter-bar" hidden>
+        <span>Showing</span>
+        <span id="filter-chip" class="chip"></span>
+        <button id="clear-filter" class="link" type="button">clear</button>
+      </div>
+
+      <div id="memo-list" class="memo-list" aria-live="polite"></div>
+      <p id="empty" class="empty" hidden></p>
+      <button id="load-more" class="load-more" type="button" hidden>Load more</button>
+    </section>
+
+    <aside class="sidebar">
+      <div id="stats" class="stats"></div>
+      <div class="tags-box">
+        <h3>Tags</h3>
+        <div id="tag-cloud" class="tag-cloud"><span class="muted">No tags yet</span></div>
+      </div>
+      <footer class="sidebar-footer">
+        <a href="https://github.com/flopsyan/jot" target="_blank" rel="noopener">Jot</a> · self-hosted notes
+      </footer>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

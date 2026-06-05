@@ -1,0 +1,16 @@
+# Runtime data (your notes + the session secret)
+/data/
+
+# Built binary
+/jot
+
+# Local environment overrides
+.env
+
+# Atomic-save temp files
+.jot-*.tmp
+*.tmp
+
+# OS / editor cruft
+.DS_Store
+*.swp
