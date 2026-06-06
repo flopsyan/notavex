@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -16,15 +15,23 @@ import (
 // ErrNotFound is returned when a memo does not exist.
 var ErrNotFound = errors.New("memo not found")
 
-// Memo is a single note.
+// Memo is a single note. Labels are explicit (set by the user), never parsed
+// from the text. Position orders the board: higher sorts first (top).
 type Memo struct {
-	ID        int64     `json:"id"`
-	Content   string    `json:"content"`
-	Tags      []string  `json:"tags"`
-	Pinned    bool      `json:"pinned"`
-	Color     string    `json:"color"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID                 int64      `json:"id"`
+	Title              string     `json:"title"`
+	Content            string     `json:"content"`
+	Labels             []string   `json:"labels"`
+	Pinned             bool       `json:"pinned"`
+	Color              string     `json:"color"`
+	Archived           bool       `json:"archived"`
+	Trashed            bool       `json:"trashed"`
+	Checklist          bool       `json:"checklist"`
+	CompletedCollapsed bool       `json:"completedCollapsed"`
+	Position           float64    `json:"position"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
+	TrashedAt          *time.Time `json:"trashedAt,omitempty"`
 }
 
 // snapshot is the on-disk representation of the whole store.
@@ -42,12 +49,6 @@ type Store struct {
 	nextID int64
 	memos  map[int64]*Memo
 }
-
-// tagPattern matches "#tag" tokens at the start of the string or right after
-// whitespace. Tags may contain letters, numbers, "_", "-" and "/" (for nested
-// tags such as #work/today) and must start with a letter or number, so that
-// ATX headings ("# Title") and URL fragments are not picked up as tags.
-var tagPattern = regexp.MustCompile(`(^|\s)#([\p{L}\p{N}][\p{L}\p{N}_/-]*)`)
 
 // NewStore opens (or creates) a JSON-backed store at path.
 func NewStore(path string) (*Store, error) {
@@ -86,7 +87,35 @@ func (s *Store) load() error {
 			s.nextID = m.ID + 1
 		}
 	}
+	s.migratePositions(snap.Memos)
 	return nil
+}
+
+// migratePositions assigns positions to legacy snapshots that predate the
+// Position field. If there is at least one memo and every memo has Position==0,
+// we reconstruct the old "newest first" order by sorting on CreatedAt (then ID)
+// ascending and numbering oldest=1 … newest=highest. This runs in memory only;
+// the new values are persisted on the next change.
+func (s *Store) migratePositions(memos []*Memo) {
+	if len(memos) == 0 {
+		return
+	}
+	for _, m := range memos {
+		if m.Position != 0 {
+			return // already positioned
+		}
+	}
+	ordered := slices.Clone(memos)
+	sort.Slice(ordered, func(i, j int) bool {
+		a, b := ordered[i], ordered[j]
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.Before(b.CreatedAt) // oldest first
+		}
+		return a.ID < b.ID
+	})
+	for i, m := range ordered {
+		m.Position = float64(i + 1)
+	}
 }
 
 // save writes the current state to disk atomically (write to a temp file in the
@@ -126,39 +155,76 @@ func (s *Store) save() error {
 	return os.Rename(tmpName, s.path)
 }
 
-// extractTags returns the unique, lower-cased tags referenced in content.
-func extractTags(content string) []string {
-	matches := tagPattern.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
+// normalizeLabels cleans a user-supplied label list: it trims each entry, drops
+// empties, dedupes case-insensitively (keeping the first occurrence's casing),
+// truncates each label to 64 runes and caps the slice at 50 labels. Input order
+// is preserved after dedupe. It returns nil when nothing remains.
+func normalizeLabels(in []string) []string {
+	if len(in) == 0 {
 		return nil
 	}
 	seen := make(map[string]bool)
-	var tags []string
-	for _, m := range matches {
-		tag := strings.Trim(strings.ToLower(m[2]), "/")
-		if tag == "" || seen[tag] {
+	var out []string
+	for _, raw := range in {
+		label := strings.TrimSpace(raw)
+		if label == "" {
 			continue
 		}
-		seen[tag] = true
-		tags = append(tags, tag)
+		if r := []rune(label); len(r) > 64 {
+			label = string(r[:64])
+		}
+		key := strings.ToLower(label)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, label)
+		if len(out) >= 50 {
+			break
+		}
 	}
-	sort.Strings(tags)
-	return tags
+	return out
 }
 
 func cloneMemo(m *Memo) *Memo {
 	c := *m
-	if m.Tags != nil {
-		c.Tags = slices.Clone(m.Tags)
+	if m.Labels != nil {
+		c.Labels = slices.Clone(m.Labels)
+	}
+	if m.TrashedAt != nil {
+		t := *m.TrashedAt
+		c.TrashedAt = &t
 	}
 	return &c
 }
 
+// maxPosition returns the highest Position over all memos (0 if there are none).
+// Callers must hold s.mu.
+func (s *Store) maxPosition() float64 {
+	var max float64
+	for _, m := range s.memos {
+		if m.Position > max {
+			max = m.Position
+		}
+	}
+	return max
+}
+
+// NewMemo carries the fields accepted when creating a memo.
+type NewMemo struct {
+	Title     string
+	Content   string
+	Color     string
+	Labels    []string
+	Checklist bool
+}
+
 // Create stores a new memo and returns it.
-func (s *Store) Create(content, color string) (*Memo, error) {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return nil, errors.New("content must not be empty")
+func (s *Store) Create(in NewMemo) (*Memo, error) {
+	title := strings.TrimSpace(in.Title)
+	content := strings.TrimSpace(in.Content)
+	if title == "" && content == "" {
+		return nil, errors.New("title or content required")
 	}
 
 	s.mu.Lock()
@@ -167,9 +233,12 @@ func (s *Store) Create(content, color string) (*Memo, error) {
 	now := time.Now().UTC()
 	m := &Memo{
 		ID:        s.nextID,
+		Title:     title,
 		Content:   content,
-		Tags:      extractTags(content),
-		Color:     color,
+		Labels:    normalizeLabels(in.Labels),
+		Color:     in.Color,
+		Checklist: in.Checklist,
+		Position:  s.maxPosition() + 1,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -184,13 +253,18 @@ func (s *Store) Create(content, color string) (*Memo, error) {
 	return cloneMemo(m), nil
 }
 
-// Update replaces the content (and re-derives the tags) of an existing memo.
-func (s *Store) Update(id int64, content string) (*Memo, error) {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return nil, errors.New("content must not be empty")
-	}
+// UpdateMemo carries the partially-updatable fields of a memo. Only the non-nil
+// fields are applied.
+type UpdateMemo struct {
+	Title     *string
+	Content   *string
+	Labels    *[]string
+	Checklist *bool
+}
 
+// Update applies the supplied non-nil fields to an existing memo and bumps
+// UpdatedAt. The resulting memo must still have a title or content.
+func (s *Store) Update(id int64, in UpdateMemo) (*Memo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -198,19 +272,43 @@ func (s *Store) Update(id int64, content string) (*Memo, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
-	prevContent, prevTags, prevUpdated := m.Content, m.Tags, m.UpdatedAt
-	m.Content = content
-	m.Tags = extractTags(content)
+
+	prevTitle, prevContent := m.Title, m.Content
+	prevLabels, prevChecklist := m.Labels, m.Checklist
+	prevUpdated := m.UpdatedAt
+
+	if in.Title != nil {
+		m.Title = strings.TrimSpace(*in.Title)
+	}
+	if in.Content != nil {
+		m.Content = strings.TrimSpace(*in.Content)
+	}
+	if in.Labels != nil {
+		m.Labels = normalizeLabels(*in.Labels)
+	}
+	if in.Checklist != nil {
+		m.Checklist = *in.Checklist
+	}
+
+	if m.Title == "" && m.Content == "" {
+		m.Title, m.Content = prevTitle, prevContent
+		m.Labels, m.Checklist = prevLabels, prevChecklist
+		return nil, errors.New("title or content required")
+	}
+
 	m.UpdatedAt = time.Now().UTC()
 
 	if err := s.save(); err != nil {
-		m.Content, m.Tags, m.UpdatedAt = prevContent, prevTags, prevUpdated
+		m.Title, m.Content = prevTitle, prevContent
+		m.Labels, m.Checklist = prevLabels, prevChecklist
+		m.UpdatedAt = prevUpdated
 		return nil, err
 	}
 	return cloneMemo(m), nil
 }
 
-// SetPinned pins or unpins a memo. Pinning does not change UpdatedAt.
+// SetPinned pins or unpins a memo. Pinning a memo un-archives it. This does not
+// change UpdatedAt.
 func (s *Store) SetPinned(id int64, pinned bool) (*Memo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -219,11 +317,14 @@ func (s *Store) SetPinned(id int64, pinned bool) (*Memo, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
-	prev := m.Pinned
+	prevPinned, prevArchived := m.Pinned, m.Archived
 	m.Pinned = pinned
+	if pinned {
+		m.Archived = false
+	}
 
 	if err := s.save(); err != nil {
-		m.Pinned = prev
+		m.Pinned, m.Archived = prevPinned, prevArchived
 		return nil, err
 	}
 	return cloneMemo(m), nil
@@ -248,7 +349,82 @@ func (s *Store) SetColor(id int64, color string) (*Memo, error) {
 	return cloneMemo(m), nil
 }
 
-// Delete removes a memo.
+// SetArchived archives or unarchives a memo. Archiving a memo unpins it. This
+// does not change UpdatedAt.
+func (s *Store) SetArchived(id int64, archived bool) (*Memo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.memos[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	prevArchived, prevPinned := m.Archived, m.Pinned
+	m.Archived = archived
+	if archived {
+		m.Pinned = false
+	}
+
+	if err := s.save(); err != nil {
+		m.Archived, m.Pinned = prevArchived, prevPinned
+		return nil, err
+	}
+	return cloneMemo(m), nil
+}
+
+// SetTrashed moves a memo to the trash or restores it. Trashing also unpins;
+// restoring also unarchives. This does not change UpdatedAt.
+func (s *Store) SetTrashed(id int64, trashed bool) (*Memo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.memos[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	prevTrashed, prevTrashedAt := m.Trashed, m.TrashedAt
+	prevPinned, prevArchived := m.Pinned, m.Archived
+
+	if trashed {
+		now := time.Now().UTC()
+		m.Trashed = true
+		m.TrashedAt = &now
+		m.Pinned = false
+	} else {
+		m.Trashed = false
+		m.TrashedAt = nil
+		m.Archived = false
+	}
+
+	if err := s.save(); err != nil {
+		m.Trashed, m.TrashedAt = prevTrashed, prevTrashedAt
+		m.Pinned, m.Archived = prevPinned, prevArchived
+		return nil, err
+	}
+	return cloneMemo(m), nil
+}
+
+// SetCompletedCollapsed toggles whether a checklist's completed items are hidden.
+// This does not change UpdatedAt.
+func (s *Store) SetCompletedCollapsed(id int64, collapsed bool) (*Memo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.memos[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	prev := m.CompletedCollapsed
+	m.CompletedCollapsed = collapsed
+
+	if err := s.save(); err != nil {
+		m.CompletedCollapsed = prev
+		return nil, err
+	}
+	return cloneMemo(m), nil
+}
+
+// Delete permanently removes a memo.
 func (s *Store) Delete(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -264,6 +440,134 @@ func (s *Store) Delete(id int64) error {
 		return err
 	}
 	return nil
+}
+
+// EmptyTrash permanently deletes every trashed memo and returns how many were
+// removed.
+func (s *Store) EmptyTrash() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	removed := make(map[int64]*Memo)
+	for id, m := range s.memos {
+		if m.Trashed {
+			removed[id] = m
+		}
+	}
+	if len(removed) == 0 {
+		return 0, nil
+	}
+	for id := range removed {
+		delete(s.memos, id)
+	}
+
+	if err := s.save(); err != nil {
+		for id, m := range removed { // restore
+			s.memos[id] = m
+		}
+		return 0, err
+	}
+	return len(removed), nil
+}
+
+// Duplicate creates an independent copy of a memo on top of the board. The copy
+// is never pinned, archived or trashed.
+func (s *Store) Duplicate(id int64) (*Memo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	src, ok := s.memos[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+
+	now := time.Now().UTC()
+	m := &Memo{
+		ID:                 s.nextID,
+		Title:              src.Title,
+		Content:            src.Content,
+		Labels:             slices.Clone(src.Labels),
+		Color:              src.Color,
+		Checklist:          src.Checklist,
+		CompletedCollapsed: src.CompletedCollapsed,
+		Position:           s.maxPosition() + 1,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	s.memos[m.ID] = m
+	s.nextID++
+
+	if err := s.save(); err != nil {
+		delete(s.memos, m.ID) // roll back to stay consistent with disk
+		s.nextID--
+		return nil, err
+	}
+	return cloneMemo(m), nil
+}
+
+// Move reorders a memo within its group. A group is the set of active
+// (non-archived, non-trashed) memos that share the moved memo's Pinned value.
+// The memo is re-inserted immediately after afterID; when afterID is 0 or not in
+// the group it goes to the front (top). The whole group is then renumbered top
+// to bottom. This does not change UpdatedAt.
+func (s *Store) Move(id, afterID int64) (*Memo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.memos[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+
+	// Collect the moved memo's group in current visual order.
+	group := make([]*Memo, 0)
+	for _, other := range s.memos {
+		if !other.Archived && !other.Trashed && other.Pinned == m.Pinned {
+			group = append(group, other)
+		}
+	}
+	sort.Slice(group, func(i, j int) bool {
+		a, b := group[i], group[j]
+		if a.Position != b.Position {
+			return a.Position > b.Position // higher first
+		}
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.After(b.CreatedAt) // newest first
+		}
+		return a.ID > b.ID
+	})
+
+	// Snapshot positions so we can roll back on save failure.
+	prev := make(map[int64]float64, len(group))
+	for _, g := range group {
+		prev[g.ID] = g.Position
+	}
+
+	// Remove the moved memo, then re-insert after afterID (or at the front).
+	group = slices.DeleteFunc(group, func(g *Memo) bool { return g.ID == id })
+	insertAt := 0
+	if afterID != 0 {
+		for i, g := range group {
+			if g.ID == afterID {
+				insertAt = i + 1
+				break
+			}
+		}
+	}
+	group = slices.Insert(group, insertAt, m)
+
+	// Renumber top to bottom so higher positions stay on top.
+	for i, g := range group {
+		g.Position = float64(len(group) - i)
+	}
+
+	if err := s.save(); err != nil {
+		for _, g := range group {
+			g.Position = prev[g.ID] // restore
+		}
+		return nil, err
+	}
+	return cloneMemo(m), nil
 }
 
 // Get returns a single memo by ID.
@@ -287,8 +591,9 @@ func (s *Store) Count() int {
 
 // ListOptions controls filtering and pagination for List.
 type ListOptions struct {
-	Query  string // case-insensitive substring match on content
-	Tag    string // exact (case-insensitive) tag match
+	Query  string // case-insensitive substring match on title+content
+	Label  string // exact (case-insensitive) label match
+	View   string // "active" (default), "archived" or "trash"
 	Limit  int    // 0 means no limit
 	Offset int
 }
@@ -300,20 +605,38 @@ type ListResult struct {
 	Total int     `json:"total"`
 }
 
-// List returns memos matching opt, sorted pinned-first and then newest-first.
+// inView reports whether m belongs to the named view. Anything that is not
+// "archived" or "trash" is treated as the default "active" view.
+func inView(m *Memo, view string) bool {
+	switch view {
+	case "archived":
+		return m.Archived && !m.Trashed
+	case "trash":
+		return m.Trashed
+	default: // "active"
+		return !m.Archived && !m.Trashed
+	}
+}
+
+// List returns memos matching opt, sorted pinned-first, then by descending
+// position, then newest-first.
 func (s *Store) List(opt ListOptions) ListResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	query := strings.ToLower(strings.TrimSpace(opt.Query))
-	tag := strings.ToLower(strings.TrimSpace(opt.Tag))
+	label := strings.ToLower(strings.TrimSpace(opt.Label))
+	view := strings.TrimSpace(opt.View)
 
 	var filtered []*Memo
 	for _, m := range s.memos {
-		if query != "" && !strings.Contains(strings.ToLower(m.Content), query) {
+		if !inView(m, view) {
 			continue
 		}
-		if tag != "" && !slices.Contains(m.Tags, tag) {
+		if label != "" && !hasLabel(m, label) {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(m.Title+"\n"+m.Content), query) {
 			continue
 		}
 		filtered = append(filtered, m)
@@ -323,6 +646,9 @@ func (s *Store) List(opt ListOptions) ListResult {
 		a, b := filtered[i], filtered[j]
 		if a.Pinned != b.Pinned {
 			return a.Pinned // pinned memos first
+		}
+		if a.Position != b.Position {
+			return a.Position > b.Position // higher position first
 		}
 		if !a.CreatedAt.Equal(b.CreatedAt) {
 			return a.CreatedAt.After(b.CreatedAt) // newest first
@@ -344,32 +670,72 @@ func (s *Store) List(opt ListOptions) ListResult {
 	return result
 }
 
-// TagInfo is a tag together with how many memos reference it.
-type TagInfo struct {
+// hasLabel reports whether m carries the given label (compared case-insensitively;
+// want must already be lower-cased).
+func hasLabel(m *Memo, want string) bool {
+	for _, l := range m.Labels {
+		if strings.ToLower(l) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// LabelInfo is a label together with how many memos carry it.
+type LabelInfo struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
 }
 
-// Tags returns all tags ordered by descending usage, then alphabetically.
-func (s *Store) Tags() []TagInfo {
+// Labels returns every label used by a non-trashed memo, ordered by descending
+// usage and then alphabetically. Labels are grouped case-insensitively, keeping
+// the first casing encountered.
+func (s *Store) Labels() []LabelInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	counts := make(map[string]int)
+	names := make(map[string]string) // lower-case key -> display name
 	for _, m := range s.memos {
-		for _, t := range m.Tags {
-			counts[t]++
+		if m.Trashed {
+			continue
+		}
+		for _, l := range m.Labels {
+			key := strings.ToLower(l)
+			if _, ok := names[key]; !ok {
+				names[key] = l
+			}
+			counts[key]++
 		}
 	}
-	tags := make([]TagInfo, 0, len(counts))
-	for name, count := range counts {
-		tags = append(tags, TagInfo{Name: name, Count: count})
+	labels := make([]LabelInfo, 0, len(counts))
+	for key, count := range counts {
+		labels = append(labels, LabelInfo{Name: names[key], Count: count})
 	}
-	sort.Slice(tags, func(i, j int) bool {
-		if tags[i].Count != tags[j].Count {
-			return tags[i].Count > tags[j].Count
+	sort.Slice(labels, func(i, j int) bool {
+		if labels[i].Count != labels[j].Count {
+			return labels[i].Count > labels[j].Count
 		}
-		return tags[i].Name < tags[j].Name
+		return labels[i].Name < labels[j].Name
 	})
-	return tags
+	return labels
+}
+
+// Stats returns the number of memos in each top-level bucket. notes counts
+// active memos (neither archived nor trashed).
+func (s *Store) Stats() (notes, archived, trashed int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, m := range s.memos {
+		switch {
+		case m.Trashed:
+			trashed++
+		case m.Archived:
+			archived++
+		default:
+			notes++
+		}
+	}
+	return notes, archived, trashed
 }

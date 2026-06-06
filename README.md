@@ -10,12 +10,17 @@ to hack on.
   No database server, no Node build step, no external services.
 - **One file of data** — every note lives in a single JSON file, so backups are
   literally a file copy.
-- **Markdown + `#tags`** — write in Markdown, tag with hashtags, then filter and
-  search instantly.
+- **Markdown + tables + checklists** — write in Markdown (incl. GFM tables and
+  clickable task lists), with instant full-text search.
+- **Organize like Keep** — optional **titles**, **labels** (added with a button, not
+  `#text`), note **colors**, pinning, **drag-and-drop** reordering, **archive**, a
+  **trash**, and "make a copy".
+- **Smart checklists** — turn any note into a to-do list; ticked items sink to the
+  bottom under a collapsible, remembered "completed" section.
 - **Tiny footprint** — the Docker image is a few MB and runs happily on a
   Raspberry Pi (`amd64` / `arm64` / `armv7`).
-- **Keep-style UI** — a responsive masonry grid of cards, an expanding composer,
-  note **colors**, pinning, labels, dark mode, and `Ctrl/⌘ + Enter` to save.
+- **Keep-style UI** — a responsive masonry grid of cards, an expanding composer, a
+  full-screen note editor, monochrome icons, dark mode, and `Ctrl/⌘ + Enter` to save.
 
 ## Quick start
 
@@ -98,7 +103,10 @@ notes.example.com {
 
 Headings, **bold**, *italic*, ~~strikethrough~~, `inline code`, fenced code
 blocks, links, images, blockquotes, ordered/unordered lists, task lists
-(`- [ ]` / `- [x]`), horizontal rules and `#hashtags`.
+(`- [ ]` / `- [x]`, clickable to toggle), **GFM tables**, and horizontal rules.
+
+Labels are explicit: add them with the label button on a note (or in the
+composer), not by typing `#hashtags` into the text.
 
 Rendering happens safely in the browser: all input is HTML-escaped first and
 link/image URLs are sanitized, so notes can never inject scripts.
@@ -130,17 +138,23 @@ The web assets are embedded into the binary with `//go:embed`, so the compiled
 All endpoints return JSON. When `JOT_PASSWORD` is set they require the session
 cookie obtained from `POST /api/login`.
 
-| Method   | Path                  | Description                          |
-|----------|-----------------------|--------------------------------------|
-| `GET`    | `/api/memos`          | List notes (`?q=`, `?tag=`, `?limit=`, `?offset=`). |
-| `POST`   | `/api/memos`            | Create a note (`{"content": "...", "color": "mint"}`; `color` optional). |
-| `GET`    | `/api/memos/{id}`       | Fetch one note.                      |
-| `PUT`    | `/api/memos/{id}`       | Update a note's content.             |
-| `DELETE` | `/api/memos/{id}`       | Delete a note.                       |
-| `POST`   | `/api/memos/{id}/pin`   | Pin/unpin (`{"pinned": true}`).      |
-| `POST`   | `/api/memos/{id}/color` | Set color (`{"color": "mint"}`; `""` = default). |
-| `GET`    | `/api/tags`             | Tags with usage counts.              |
-| `GET`    | `/api/stats`          | `{ "memos": N, "tags": M }`.         |
+| Method   | Path                        | Description                          |
+|----------|-----------------------------|--------------------------------------|
+| `GET`    | `/api/memos`                | List notes (`?view=active`/`archived`/`trash`, `?q=`, `?label=`, `?limit=`, `?offset=`). |
+| `POST`   | `/api/memos`                | Create a note (`{title?, content?, color?, labels?, checklist?}`; needs a title or content). |
+| `GET`    | `/api/memos/{id}`           | Fetch one note.                      |
+| `PUT`    | `/api/memos/{id}`           | Update fields (`{title?, content?, labels?, checklist?}`). |
+| `DELETE` | `/api/memos/{id}`           | Permanently delete a note.           |
+| `POST`   | `/api/memos/{id}/pin`       | Pin/unpin (`{pinned}`).              |
+| `POST`   | `/api/memos/{id}/color`     | Set color (`{color}`; `""` = default). |
+| `POST`   | `/api/memos/{id}/archive`   | Archive/unarchive (`{archived}`).    |
+| `POST`   | `/api/memos/{id}/trash`     | Move to trash / restore (`{trashed}`). |
+| `POST`   | `/api/memos/{id}/duplicate` | Make a copy.                         |
+| `POST`   | `/api/memos/{id}/move`      | Reorder within its group (`{afterId}`, `0` = top). |
+| `POST`   | `/api/memos/{id}/collapsed` | Remember a checklist's "completed" collapse (`{collapsed}`). |
+| `POST`   | `/api/memos/trash/empty`    | Permanently empty the trash.         |
+| `GET`    | `/api/labels`               | Labels with usage counts.            |
+| `GET`    | `/api/stats`                | `{ notes, archived, trashed, labels }`. |
 
 ## License
 

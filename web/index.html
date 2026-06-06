@@ -5,45 +5,53 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
   <title>Jot</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M5 4h11l3 3v13H5z'/><path d='M9 12l2 2 4-4'/></svg>">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <header class="topbar">
-    <button id="nav-toggle" class="icon-btn" aria-label="Toggle menu">☰</button>
-    <div class="brand"><span class="logo">📝</span> Jot</div>
+    <button id="nav-toggle" class="icon-btn" aria-label="Toggle menu"></button>
+    <div class="brand"><span id="brand-logo" class="logo"></span> <span class="brand-name">Jot</span></div>
     <div class="search">
       <input id="search" type="search" placeholder="Search your notes" autocomplete="off" spellcheck="false">
     </div>
     <div class="topbar-actions">
-      <button id="theme-toggle" class="icon-btn" title="Toggle light/dark theme" aria-label="Toggle theme">◑</button>
-      <button id="logout" class="icon-btn" title="Log out" aria-label="Log out" hidden>⎋</button>
+      <button id="theme-toggle" class="icon-btn" title="Toggle light/dark theme" aria-label="Toggle theme"></button>
+      <button id="logout" class="icon-btn" title="Log out" aria-label="Log out" hidden></button>
     </div>
   </header>
 
   <div class="app">
     <aside id="sidebar" class="sidebar">
-      <button id="nav-all" class="nav-item active" data-tag="">
-        <span class="nav-ico">🗒️</span><span class="nav-text">Notes</span>
-      </button>
+      <nav id="nav-views" class="nav-views"></nav>
       <div class="nav-section">Labels</div>
       <div id="label-list" class="label-list"></div>
     </aside>
 
     <main class="main">
       <form id="composer" class="composer collapsed" autocomplete="off">
-        <input id="composer-collapsed" class="composer-collapsed" placeholder="Take a note…" readonly>
+        <div class="composer-collapsed-bar">
+          <input id="composer-collapsed" class="composer-collapsed" placeholder="Take a note…" readonly>
+          <button type="button" id="composer-newlist" class="icon-btn" title="New list" aria-label="New list"></button>
+        </div>
         <div class="composer-expanded">
-          <textarea id="editor" rows="3" placeholder="Take a note…  (Markdown &amp; #tags supported)"></textarea>
+          <input id="composer-title" class="composer-title" placeholder="Title" maxlength="1024">
+          <textarea id="editor" rows="3" placeholder="Take a note…  (Markdown &amp; tables supported)"></textarea>
+          <div id="composer-checklist" class="note-checklist composer-checklist" hidden></div>
+          <div id="composer-chips" class="composer-chips" hidden></div>
           <div id="composer-preview" class="preview markdown" hidden></div>
           <div class="composer-toolbar">
             <div id="composer-colors" class="color-dots"></div>
+            <button type="button" id="composer-label-btn" class="icon-btn" title="Add label" aria-label="Add label"></button>
+            <button type="button" id="composer-list-btn" class="icon-btn" title="Checklist" aria-label="Toggle checklist"></button>
             <button type="button" id="composer-preview-btn" class="ghost">Preview</button>
             <span class="spacer"></span>
             <button type="button" id="composer-close" class="text-btn">Close</button>
           </div>
         </div>
       </form>
+
+      <div id="board-actions" class="board-actions" hidden></div>
 
       <section id="pinned-section" class="grid-section" hidden>
         <h2 class="section-label">Pinned</h2>

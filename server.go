@@ -20,6 +20,7 @@ const (
 	sessionCookie = "jot_session"
 	sessionMaxAge = 30 * 24 * time.Hour
 	maxContentLen = 1 << 20 // 1 MiB per memo
+	maxTitleLen   = 1024    // characters in a memo title
 )
 
 // Auth holds single-user authentication state. When enabled is false the whole
@@ -89,12 +90,18 @@ func (s *Server) Routes() http.Handler {
 	// Memo API (requires authentication when enabled).
 	mux.HandleFunc("GET /api/memos", s.requireAuth(s.handleListMemos))
 	mux.HandleFunc("POST /api/memos", s.requireAuth(s.handleCreateMemo))
+	mux.HandleFunc("POST /api/memos/trash/empty", s.requireAuth(s.handleEmptyTrash))
 	mux.HandleFunc("GET /api/memos/{id}", s.requireAuth(s.handleGetMemo))
 	mux.HandleFunc("PUT /api/memos/{id}", s.requireAuth(s.handleUpdateMemo))
 	mux.HandleFunc("DELETE /api/memos/{id}", s.requireAuth(s.handleDeleteMemo))
 	mux.HandleFunc("POST /api/memos/{id}/pin", s.requireAuth(s.handlePinMemo))
 	mux.HandleFunc("POST /api/memos/{id}/color", s.requireAuth(s.handleSetColor))
-	mux.HandleFunc("GET /api/tags", s.requireAuth(s.handleTags))
+	mux.HandleFunc("POST /api/memos/{id}/archive", s.requireAuth(s.handleArchiveMemo))
+	mux.HandleFunc("POST /api/memos/{id}/trash", s.requireAuth(s.handleTrashMemo))
+	mux.HandleFunc("POST /api/memos/{id}/duplicate", s.requireAuth(s.handleDuplicateMemo))
+	mux.HandleFunc("POST /api/memos/{id}/move", s.requireAuth(s.handleMoveMemo))
+	mux.HandleFunc("POST /api/memos/{id}/collapsed", s.requireAuth(s.handleCollapseMemo))
+	mux.HandleFunc("GET /api/labels", s.requireAuth(s.handleLabels))
 	mux.HandleFunc("GET /api/stats", s.requireAuth(s.handleStats))
 
 	// Pages.
@@ -244,7 +251,8 @@ func (s *Server) handleListMemos(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	writeJSON(w, http.StatusOK, s.store.List(ListOptions{
 		Query:  q.Get("q"),
-		Tag:    q.Get("tag"),
+		Label:  q.Get("label"),
+		View:   q.Get("view"),
 		Limit:  atoiDefault(q.Get("limit"), 0),
 		Offset: atoiDefault(q.Get("offset"), 0),
 	}))
@@ -252,8 +260,11 @@ func (s *Server) handleListMemos(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateMemo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Content string `json:"content"`
-		Color   string `json:"color"`
+		Title     string   `json:"title"`
+		Content   string   `json:"content"`
+		Color     string   `json:"color"`
+		Labels    []string `json:"labels"`
+		Checklist bool     `json:"checklist"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentLen+4096)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
@@ -263,15 +274,21 @@ func (s *Server) handleCreateMemo(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "content too large")
 		return
 	}
-	if strings.TrimSpace(req.Content) == "" {
-		writeJSONError(w, http.StatusBadRequest, "content must not be empty")
+	if len(req.Title) > maxTitleLen {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "title too large")
 		return
 	}
 	if !validColor(req.Color) {
 		writeJSONError(w, http.StatusBadRequest, "invalid color")
 		return
 	}
-	m, err := s.store.Create(req.Content, req.Color)
+	m, err := s.store.Create(NewMemo{
+		Title:     req.Title,
+		Content:   req.Content,
+		Color:     req.Color,
+		Labels:    req.Labels,
+		Checklist: req.Checklist,
+	})
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -297,11 +314,30 @@ func (s *Server) handleUpdateMemo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	content, ok := decodeContent(w, r)
-	if !ok {
+	var req struct {
+		Title     *string   `json:"title"`
+		Content   *string   `json:"content"`
+		Labels    *[]string `json:"labels"`
+		Checklist *bool     `json:"checklist"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentLen+4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	m, err := s.store.Update(id, content)
+	if req.Content != nil && len(*req.Content) > maxContentLen {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "content too large")
+		return
+	}
+	if req.Title != nil && len(*req.Title) > maxTitleLen {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "title too large")
+		return
+	}
+	m, err := s.store.Update(id, UpdateMemo{
+		Title:     req.Title,
+		Content:   req.Content,
+		Labels:    req.Labels,
+		Checklist: req.Checklist,
+	})
 	if err != nil {
 		s.writeStoreError(w, err)
 		return
@@ -365,14 +401,118 @@ func (s *Server) handleSetColor(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, m)
 }
 
-func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.store.Tags())
+func (s *Server) handleArchiveMemo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Archived bool `json:"archived"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	m, err := s.store.SetArchived(id, req.Archived)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) handleTrashMemo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Trashed bool `json:"trashed"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	m, err := s.store.SetTrashed(id, req.Trashed)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) handleDuplicateMemo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	m, err := s.store.Duplicate(id)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, m)
+}
+
+func (s *Server) handleMoveMemo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		AfterID int64 `json:"afterId"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	m, err := s.store.Move(id, req.AfterID)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) handleCollapseMemo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Collapsed bool `json:"collapsed"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	m, err := s.store.SetCompletedCollapsed(id, req.Collapsed)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) handleEmptyTrash(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.store.EmptyTrash(); err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.store.Labels())
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	notes, archived, trashed := s.store.Stats()
 	writeJSON(w, http.StatusOK, map[string]int{
-		"memos": s.store.Count(),
-		"tags":  len(s.store.Tags()),
+		"notes":    notes,
+		"archived": archived,
+		"trashed":  trashed,
+		"labels":   len(s.store.Labels()),
 	})
 }
 
@@ -395,25 +535,6 @@ var allowedColors = map[string]bool{
 }
 
 func validColor(c string) bool { return allowedColors[c] }
-
-func decodeContent(w http.ResponseWriter, r *http.Request) (string, bool) {
-	var req struct {
-		Content string `json:"content"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentLen+4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
-		return "", false
-	}
-	if len(req.Content) > maxContentLen {
-		writeJSONError(w, http.StatusRequestEntityTooLarge, "content too large")
-		return "", false
-	}
-	if strings.TrimSpace(req.Content) == "" {
-		writeJSONError(w, http.StatusBadRequest, "content must not be empty")
-		return "", false
-	}
-	return req.Content, true
-}
 
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
