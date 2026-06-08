@@ -4,9 +4,9 @@
 /data
 .env
 *.tmp
-.jot-*.tmp
+.notavex-*.tmp
 .secret
-jot
+notavex
 README.md
 LICENSE
 Makefile

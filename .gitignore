@@ -2,13 +2,13 @@
 /data/
 
 # Built binary
-/jot
+/notavex
 
 # Local environment overrides
 .env
 
 # Atomic-save temp files
-.jot-*.tmp
+.notavex-*.tmp
 *.tmp
 
 # OS / editor cruft

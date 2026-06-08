@@ -1,4 +1,4 @@
-// Command jot is a tiny, self-hosted notes app with Markdown support.
+// Command notavex is a tiny, self-hosted notes app with Markdown support.
 //
 // It serves a single-page web UI and a small JSON API, storing every note in
 // one JSON file. It depends only on the Go standard library, so it builds into
@@ -27,16 +27,16 @@ import (
 var webFS embed.FS
 
 func main() {
-	addr := envOr("JOT_ADDR", ":8080")
-	dataDir := envOr("JOT_DATA_DIR", "data")
-	password := os.Getenv("JOT_PASSWORD")
-	secure := strings.EqualFold(os.Getenv("JOT_SECURE"), "true")
+	addr := envOr("NOTAVEX_ADDR", ":8080")
+	dataDir := envOr("NOTAVEX_DATA_DIR", "data")
+	password := os.Getenv("NOTAVEX_PASSWORD")
+	secure := strings.EqualFold(os.Getenv("NOTAVEX_SECURE"), "true")
 
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		log.Fatalf("create data dir %q: %v", dataDir, err)
 	}
 
-	store, err := NewStore(filepath.Join(dataDir, "jot.json"))
+	store, err := NewStore(filepath.Join(dataDir, "notavex.json"))
 	if err != nil {
 		log.Fatalf("open store: %v", err)
 	}
@@ -48,8 +48,8 @@ func main() {
 	if auth.enabled {
 		log.Print("authentication: ENABLED (single-user password login)")
 	} else {
-		log.Print("authentication: DISABLED — set JOT_PASSWORD to require a login. " +
-			"Do not expose Jot to the internet without it!")
+		log.Print("authentication: DISABLED — set NOTAVEX_PASSWORD to require a login. " +
+			"Do not expose Notavex to the internet without it!")
 	}
 
 	static, err := fs.Sub(webFS, "web")
@@ -64,7 +64,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("Jot listening on http://localhost%s  (data dir: %s, %d notes)", addr, dataDir, store.Count())
+		log.Printf("Notavex listening on http://localhost%s  (data dir: %s, %d notes)", addr, dataDir, store.Count())
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)
 		}
@@ -97,7 +97,7 @@ func newAuth(password string, secure bool, dataDir string) (*Auth, error) {
 	}
 	// A fixed secret from the environment lets sessions survive restarts and
 	// work across multiple instances; otherwise we persist a random one.
-	if env := os.Getenv("JOT_SECRET"); env != "" {
+	if env := os.Getenv("NOTAVEX_SECRET"); env != "" {
 		sum := sha256.Sum256([]byte(env))
 		a.secret = sum[:]
 		return a, nil

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	sessionCookie = "jot_session"
+	sessionCookie = "notavex_session"
 	sessionMaxAge = 30 * 24 * time.Hour
 	maxContentLen = 1 << 20 // 1 MiB per memo
 	maxTitleLen   = 1024    // characters in a memo title

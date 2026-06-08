@@ -1,3 +1,3 @@
-module github.com/flopsyan/jot
+module github.com/flopsyan/notavex
 
 go 1.22

@@ -1,7 +1,7 @@
 'use strict';
 
 // ===================================================================
-// Jot — Google Keep-style notes UI
+// Notavex — Google Keep-style notes UI
 // ===================================================================
 
 const COLORS = [
@@ -1919,7 +1919,7 @@ function applyTheme(theme) {
 
 function toggleTheme() {
   const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('jot-theme', next);
+  localStorage.setItem('notavex-theme', next);
   applyTheme(next);
 }
 
@@ -1941,7 +1941,7 @@ function paintStaticIcons() {
 }
 
 async function init() {
-  applyTheme(localStorage.getItem('jot-theme'));
+  applyTheme(localStorage.getItem('notavex-theme'));
   paintStaticIcons();
   themeToggle.addEventListener('click', toggleTheme);
   // Keep the icon honest when following the OS and it flips light/dark.

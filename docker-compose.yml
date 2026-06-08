@@ -1,20 +1,20 @@
 services:
-  jot:
+  notavex:
     build: .
     # Prefer a prebuilt image? Comment out "build" above and use:
-    # image: ghcr.io/flopsyan/jot:latest
-    container_name: jot
+    # image: ghcr.io/flopsyan/notavex:latest
+    container_name: notavex
     restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
-      JOT_ADDR: ":8080"
+      NOTAVEX_ADDR: ":8080"
       # Uncomment to require a login (recommended if reachable from the internet):
-      # JOT_PASSWORD: "change-me-please"
-      # Set to "true" if a reverse proxy terminates HTTPS in front of Jot:
-      # JOT_SECURE: "true"
+      # NOTAVEX_PASSWORD: "change-me-please"
+      # Set to "true" if a reverse proxy terminates HTTPS in front of Notavex:
+      # NOTAVEX_SECURE: "true"
     volumes:
-      - jot-data:/data
+      - notavex-data:/data
 
 volumes:
-  jot-data:
+  notavex-data:

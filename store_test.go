@@ -9,7 +9,7 @@ import (
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := NewStore(filepath.Join(t.TempDir(), "jot.json"))
+	s, err := NewStore(filepath.Join(t.TempDir(), "notavex.json"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -528,7 +528,7 @@ func TestCreateAndSetColor(t *testing.T) {
 }
 
 func TestPersistenceAcrossReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "jot.json")
+	path := filepath.Join(t.TempDir(), "notavex.json")
 	s1, err := NewStore(path)
 	if err != nil {
 		t.Fatal(err)
@@ -571,7 +571,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 }
 
 func TestLegacyPositionMigration(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "jot.json")
+	path := filepath.Join(t.TempDir(), "notavex.json")
 	// A legacy snapshot: memos predate the Position field (it is absent/zero).
 	// Created order is 1 (oldest) .. 3 (newest); newest-first must be preserved.
 	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)

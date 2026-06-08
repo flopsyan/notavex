@@ -134,7 +134,7 @@ func (s *Store) save() error {
 		return err
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".jot-*.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".notavex-*.tmp")
 	if err != nil {
 		return err
 	}

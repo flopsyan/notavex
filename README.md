@@ -1,4 +1,4 @@
-# 📝 Jot
+# 📝 Notavex
 
 A tiny, self-hosted notes app with Markdown support — your own private stream of
 thoughts, tasks and snippets. A **Google Keep-style** board (masonry grid of
@@ -27,26 +27,26 @@ to hack on.
 ### Docker Compose (recommended)
 
 ```bash
-git clone https://github.com/flopsyan/jot.git
-cd jot
+git clone https://github.com/flopsyan/notavex.git
+cd notavex
 docker compose up -d
 ```
 
-Open <http://localhost:8080>. Notes are stored in the `jot-data` Docker volume.
+Open <http://localhost:8080>. Notes are stored in the `notavex-data` Docker volume.
 
 To require a login, set a password in `docker-compose.yml`:
 
 ```yaml
     environment:
-      JOT_PASSWORD: "your-strong-password"
+      NOTAVEX_PASSWORD: "your-strong-password"
 ```
 
 ### Docker (without Compose)
 
 ```bash
-docker build -t jot .
-docker run -d --name jot -p 8080:8080 -v jot-data:/data \
-  -e JOT_PASSWORD=your-strong-password jot
+docker build -t notavex .
+docker run -d --name notavex -p 8080:8080 -v notavex-data:/data \
+  -e NOTAVEX_PASSWORD=your-strong-password notavex
 ```
 
 ### From source
@@ -56,38 +56,38 @@ Requires Go 1.22+.
 ```bash
 go run .                          # serves http://localhost:8080, data in ./data
 # …or build a self-contained binary:
-go build -o jot . && ./jot
+go build -o notavex . && ./notavex
 ```
 
 ## Configuration
 
 Everything is configured through environment variables:
 
-| Variable       | Default    | Description |
-|----------------|------------|-------------|
-| `JOT_ADDR`     | `:8080`    | Address/port to listen on. |
-| `JOT_DATA_DIR` | `data`     | Directory for the notes file and session secret. |
-| `JOT_PASSWORD` | *(unset)*  | If set, a login with this password is required. If unset, Jot runs **without authentication**. |
-| `JOT_SECURE`   | `false`    | Set to `true` when serving over HTTPS so the session cookie is marked `Secure`. |
-| `JOT_SECRET`   | *(auto)*   | Session signing secret. If unset, a random one is generated and stored in the data dir. |
+| Variable           | Default    | Description |
+|--------------------|------------|-------------|
+| `NOTAVEX_ADDR`     | `:8080`    | Address/port to listen on. |
+| `NOTAVEX_DATA_DIR` | `data`     | Directory for the notes file and session secret. |
+| `NOTAVEX_PASSWORD` | *(unset)*  | If set, a login with this password is required. If unset, Notavex runs **without authentication**. |
+| `NOTAVEX_SECURE`   | `false`    | Set to `true` when serving over HTTPS so the session cookie is marked `Secure`. |
+| `NOTAVEX_SECRET`   | *(auto)*   | Session signing secret. If unset, a random one is generated and stored in the data dir. |
 
 ## Data & backups
 
-Everything lives in `JOT_DATA_DIR`:
+Everything lives in `NOTAVEX_DATA_DIR`:
 
-- `jot.json` — all your notes, as human-readable JSON, written atomically.
+- `notavex.json` — all your notes, as human-readable JSON, written atomically.
 - `.secret` — the session signing key.
 
-To back up, copy `jot.json` somewhere safe. To restore, put it back and restart.
+To back up, copy `notavex.json` somewhere safe. To restore, put it back and restart.
 
 ## Security
 
-Jot has **no authentication unless you set `JOT_PASSWORD`**. If you expose it to
+Notavex has **no authentication unless you set `NOTAVEX_PASSWORD`**. If you expose it to
 the internet:
 
-1. Set `JOT_PASSWORD` to a strong value.
+1. Set `NOTAVEX_PASSWORD` to a strong value.
 2. Put it behind HTTPS (a reverse proxy such as Caddy, Traefik or Nginx) and set
-   `JOT_SECURE=true`.
+   `NOTAVEX_SECURE=true`.
 
 For a home-only setup (LAN, VPN, Tailscale) you can leave it open.
 
@@ -131,11 +131,11 @@ web/            embedded single-page UI (HTML/CSS/JS, no build step)
 ```
 
 The web assets are embedded into the binary with `//go:embed`, so the compiled
-`jot` is fully self-contained.
+`notavex` is fully self-contained.
 
 ## API
 
-All endpoints return JSON. When `JOT_PASSWORD` is set they require the session
+All endpoints return JSON. When `NOTAVEX_PASSWORD` is set they require the session
 cookie obtained from `POST /api/login`.
 
 | Method   | Path                        | Description                          |

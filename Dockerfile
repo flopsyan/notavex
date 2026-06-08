@@ -16,17 +16,17 @@ RUN go mod download
 COPY . .
 
 # Build a static, dependency-free binary for the build platform.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /jot .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /notavex .
 
 # ---- runtime stage ----
 FROM gcr.io/distroless/static-debian12:latest
 
-COPY --from=build /jot /jot
+COPY --from=build /notavex /notavex
 
-ENV JOT_ADDR=":8080" \
-    JOT_DATA_DIR="/data"
+ENV NOTAVEX_ADDR=":8080" \
+    NOTAVEX_DATA_DIR="/data"
 
 EXPOSE 8080
 VOLUME ["/data"]
 
-ENTRYPOINT ["/jot"]
+ENTRYPOINT ["/notavex"]
