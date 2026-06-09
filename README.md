@@ -19,10 +19,14 @@ to hack on.
   bottom under a collapsible, remembered "completed" section.
 - **Images** — attach pictures from the composer, a card's action row or the editor;
   they are downscaled in the browser and stored inline (no uploads folder to manage).
-- **Login & settings** — an optional password **login** with an in-app **password
-  change** (under **Account**), plus a settings menu for the **color theme**
-  (System / Light / Dark) and **language** (English / German). Theme and language
-  default to your system and are remembered per browser.
+- **Accounts & login** — an optional **login** with user accounts. The first
+  **admin** is bootstrapped from the environment; further accounts are added in the
+  app, where **only admins can create or remove users**. Everyone can change their
+  own display name and password under **Account**. Once an account exists a login is
+  required and **nothing is shown until you sign in**.
+- **Settings** — a menu for the **color theme** (System / Light / Dark) and
+  **language** (English / German); both default to your system and are remembered
+  per browser.
 - **Collapsible sidebar** — a Google Keep-style hamburger collapses the sidebar to an
   icon rail; hover to peek the full labels.
 - **Tiny footprint** — the Docker image is a few MB and runs happily on a
@@ -74,10 +78,20 @@ Everything is configured through environment variables:
 | Variable           | Default    | Description |
 |--------------------|------------|-------------|
 | `NOTAVEX_ADDR`     | `:8080`    | Address/port to listen on. |
-| `NOTAVEX_DATA_DIR` | `data`     | Directory for the notes file, password hash and session secret. |
-| `NOTAVEX_PASSWORD` | *(unset)*  | **Bootstraps** the login password on first run. After that it is stored hashed in the data dir (and can be changed under **Account**), so this variable is then ignored. Unset **and** no stored password → Notavex runs **without authentication**. |
+| `NOTAVEX_DATA_DIR` | `data`     | Directory for the notes, accounts and session secret. |
+| `NOTAVEX_PASSWORD` | *(unset)*  | **Bootstraps** the admin account on first run. After that accounts live in the data dir (`users.json`) and are managed in the app, so this is then ignored. Unset **and** no account → Notavex runs **without authentication**. |
+| `NOTAVEX_USER`     | `admin`    | Username for the bootstrapped admin account. |
 | `NOTAVEX_SECURE`   | `false`    | Set to `true` when serving over HTTPS so the session cookie is marked `Secure`. |
 | `NOTAVEX_SECRET`   | *(auto)*   | Session signing secret. If unset, a random one is generated and stored in the data dir. |
+
+### Accounts
+
+The site requires a login as soon as one account exists. The **first admin** is
+bootstrapped from `NOTAVEX_USER`/`NOTAVEX_PASSWORD`; afterwards manage accounts in
+the app under **Settings → Users** (admin only). New accounts are normal users:
+they use everything but **cannot create or remove accounts**. Everyone can change
+their own display name and password under **Account**. The last account, and the
+last admin, cannot be removed, so you can never lock yourself out.
 
 ## Data & backups
 
@@ -85,13 +99,14 @@ Everything lives in `NOTAVEX_DATA_DIR`:
 
 - `notavex.json` — all your notes (incl. attached images as inline data), as
   human-readable JSON, written atomically.
-- `auth.json` — the **salted PBKDF2 hash** of your login password (only present
-  once a password has been set; never the password itself).
+- `users.json` — the accounts: usernames and **salted PBKDF2 hashes** (never the
+  passwords themselves). Only present once an account exists.
 - `.secret` — the session signing key.
 
 To back up, copy the data directory somewhere safe. To restore, put it back and
-restart. To **reset a forgotten password**, delete `auth.json` and set
-`NOTAVEX_PASSWORD` again (it re-bootstraps on the next start).
+restart. To **start over with logins**, delete `users.json` and set
+`NOTAVEX_PASSWORD` (and optionally `NOTAVEX_USER`) again — a fresh admin is
+bootstrapped on the next start.
 
 ### Storing the data on a NAS
 
@@ -125,16 +140,17 @@ bind-mounts its `/app/data` (SQLite) folder the same way.
 
 ## Security
 
-Notavex has **no authentication unless you set `NOTAVEX_PASSWORD`**. If you expose it to
-the internet:
+Notavex has **no authentication until you create an account** (set
+`NOTAVEX_PASSWORD`). If you expose it to the internet:
 
-1. Set `NOTAVEX_PASSWORD` to a strong value.
+1. Set `NOTAVEX_PASSWORD` (and optionally `NOTAVEX_USER`) to bootstrap the admin.
 2. Put it behind HTTPS (a reverse proxy such as Caddy, Traefik or Nginx) and set
    `NOTAVEX_SECURE=true`.
 
-The password is kept only as a salted PBKDF2 hash and can be changed in the app
-under **Account**. Changing it invalidates all existing sessions (every logged-in
-browser is signed out), because session tokens are bound to the password hash.
+Passwords are kept only as salted PBKDF2 hashes. Sessions are stateless, signed
+cookies (HMAC-SHA256) bound to the user's password hash, so changing a password
+signs that user's other sessions out. Once an account exists the whole app
+requires a login — visitors see only the sign-in screen.
 
 For a home-only setup (LAN, VPN, Tailscale) you can leave it open.
 
@@ -162,7 +178,7 @@ link/image URLs are sanitized, so notes can never inject scripts.
 
 ```bash
 go run .        # run locally
-go test ./...   # run the store tests
+go test ./...   # run the unit tests
 go vet ./...    # static checks
 gofmt -w .      # format
 ```
@@ -172,6 +188,7 @@ Project layout:
 ```
 main.go         entry point, configuration, graceful shutdown
 auth.go         password hashing (PBKDF2) and signed session tokens
+users.go        the JSON-backed account store (admin / normal users)
 store.go        the JSON-backed, thread-safe note store
 server.go       HTTP routing and the JSON API
 store_test.go   store unit tests
@@ -184,14 +201,19 @@ The web assets are embedded into the binary with `//go:embed`, so the compiled
 
 ## API
 
-All endpoints return JSON. When a login password is set they require the session
-cookie obtained from `POST /api/login`.
+All endpoints return JSON. Once an account exists they require the session cookie
+obtained from `POST /api/login`; the user-management routes require an admin.
 
 | Method   | Path                        | Description                          |
 |----------|-----------------------------|--------------------------------------|
-| `POST`   | `/api/login`                | Start a session (`{password}`).      |
+| `GET`    | `/api/config`               | `{authEnabled, authed, user}` for the current session. |
+| `POST`   | `/api/login`                | Start a session (`{username, password}`). |
 | `POST`   | `/api/logout`               | End the session.                     |
-| `POST`   | `/api/password`             | Change the password (`{currentPassword, newPassword}`); re-issues the session. |
+| `POST`   | `/api/password`             | Change your own password (`{currentPassword, newPassword}`); re-issues the session. |
+| `POST`   | `/api/profile`              | Change your own display name (`{displayName}`). |
+| `GET`    | `/api/users`                | List accounts.                       |
+| `POST`   | `/api/users`                | Create a (normal) account (`{username, displayName?, password}`). **Admin only.** |
+| `DELETE` | `/api/users/{id}`           | Remove an account. **Admin only.**   |
 | `GET`    | `/api/memos`                | List notes (`?view=active`/`archived`/`trash`, `?q=`, `?label=`, `?limit=`, `?offset=`). |
 | `POST`   | `/api/memos`                | Create a note (`{title?, content?, color?, labels?, checklist?, images?}`; needs a title, content or image). |
 | `GET`    | `/api/memos/{id}`           | Fetch one note.                      |

@@ -108,6 +108,29 @@ const STRINGS = {
     pw_wrong_current: 'Current password is wrong.',
     pw_required: 'Please fill in all fields.',
     pw_error: 'Could not change the password.',
+    // account / users management
+    account_username: 'Username',
+    username_locked: 'Your username is your login and cannot be changed.',
+    display_name: 'Display name',
+    display_name_ph: 'shown in your account (optional)',
+    password_optional: 'Leave the password fields empty to keep your current password.',
+    saved: 'Saved.',
+    login_user: 'Username',
+    login_password: 'Password',
+    users_title: 'Users',
+    users_sub: 'Only admins can add or remove accounts.',
+    role_admin: 'Admin',
+    you: 'you',
+    add_user: 'Add user',
+    new_username_ph: 'e.g. anna',
+    remove: 'Remove',
+    confirm_delete_user: 'Remove this user?',
+    confirm_delete_self: 'Remove your own account? You will be logged out.',
+    err_invalid_username: 'Invalid username (2–32 chars: letters, numbers, . _ -).',
+    err_taken: 'Username already taken.',
+    err_last_user: 'Cannot remove the last account.',
+    err_last_admin: 'Cannot remove the last admin account.',
+    err_generic: 'Something went wrong.',
   },
   de: {
     menu_toggle: 'Menü ein-/ausklappen',
@@ -197,6 +220,29 @@ const STRINGS = {
     pw_wrong_current: 'Aktuelles Passwort ist falsch.',
     pw_required: 'Bitte alle Felder ausfüllen.',
     pw_error: 'Passwort konnte nicht geändert werden.',
+    // Konto / Benutzerverwaltung
+    account_username: 'Benutzername',
+    username_locked: 'Dein Benutzername ist dein Login und nicht änderbar.',
+    display_name: 'Anzeigename',
+    display_name_ph: 'wird in deinem Konto angezeigt (optional)',
+    password_optional: 'Lass die Passwortfelder leer, um dein Passwort nicht zu ändern.',
+    saved: 'Gespeichert.',
+    login_user: 'Benutzername',
+    login_password: 'Passwort',
+    users_title: 'Benutzer',
+    users_sub: 'Nur Admins können Konten anlegen oder entfernen.',
+    role_admin: 'Admin',
+    you: 'du',
+    add_user: 'Benutzer anlegen',
+    new_username_ph: 'z. B. anna',
+    remove: 'Entfernen',
+    confirm_delete_user: 'Diesen Benutzer entfernen?',
+    confirm_delete_self: 'Dein eigenes Konto entfernen? Du wirst abgemeldet.',
+    err_invalid_username: 'Ungültiger Benutzername (2–32 Zeichen: Buchstaben, Zahlen, . _ -).',
+    err_taken: 'Benutzername bereits vergeben.',
+    err_last_user: 'Der letzte Account kann nicht entfernt werden.',
+    err_last_admin: 'Der letzte Admin-Account kann nicht entfernt werden.',
+    err_generic: 'Etwas ist schiefgelaufen.',
   },
 };
 
@@ -253,8 +299,8 @@ const COLORS = [
 const MAX_IMAGES = 12;       // keep in sync with the server's maxImages
 const IMAGE_MAX_EDGE = 1600; // longest edge after in-browser downscale
 
-// view: 'active' | 'archived' | 'trash'
-const state = { authEnabled: false, all: [], query: '', label: '', view: 'active' };
+// view: 'active' | 'archived' | 'trash'; user: the logged-in account or null
+const state = { authEnabled: false, user: null, all: [], query: '', label: '', view: 'active' };
 
 // Composer scratch state (reset after each note is committed).
 let composerColor = '';
@@ -277,6 +323,9 @@ const accountMenu = $('#account-menu');
 const accountProfileBtn = $('#account-profile');
 const accountSettingsBtn = $('#account-settings');
 const accountLogoutBtn = $('#account-logout');
+const accountCard = $('#account-card');
+const accountCardName = $('#account-card-name');
+const accountCardSub = $('#account-card-sub');
 const navToggle = $('#nav-toggle');
 const sidebar = $('#sidebar');
 const scrim = $('#scrim');
@@ -2504,6 +2553,138 @@ function openSettingsDialog() {
   )));
 
   body.appendChild(section);
+
+  // User management is admin-only (mirrors epulonis: only admins add/remove).
+  if (state.user && state.user.isAdmin) {
+    body.appendChild(buildUsersSection());
+  }
+}
+
+// The admin-only "Users" section: a live list plus an add-user form.
+function buildUsersSection() {
+  const section = document.createElement('div');
+  section.className = 'dialog-section';
+  const title = document.createElement('div');
+  title.className = 'dialog-section-title';
+  title.textContent = t('users_title');
+  section.append(title, fieldHint(t('users_sub')));
+
+  const list = document.createElement('div');
+  list.className = 'user-list';
+  section.appendChild(list);
+
+  const msg = document.createElement('p');
+  msg.className = 'dialog-msg';
+  msg.hidden = true;
+  section.appendChild(msg);
+  const showMsg = (text, ok) => {
+    msg.textContent = text;
+    msg.className = 'dialog-msg ' + (ok ? 'ok' : 'err');
+    msg.hidden = false;
+  };
+
+  const refresh = async () => {
+    try {
+      renderUserList(list, await api('GET', '/users'), refresh, showMsg);
+    } catch (err) { /* ignore */ }
+  };
+  refresh();
+
+  const form = document.createElement('form');
+  form.autocomplete = 'off';
+  const uname = textField(t('login_user'), '');
+  uname.input.placeholder = t('new_username_ph');
+  const dname = textField(t('display_name'), '');
+  dname.input.placeholder = t('display_name_ph');
+  const pass = passwordField(t('login_password'), 'new-password');
+  const grid = document.createElement('div');
+  grid.className = 'grid-2';
+  grid.append(uname.field, dname.field);
+  form.append(grid, pass.field);
+
+  const actions = document.createElement('div');
+  actions.className = 'dialog-actions';
+  const add = document.createElement('button');
+  add.type = 'submit';
+  add.className = 'btn-primary';
+  add.textContent = t('add_user');
+  actions.appendChild(add);
+  form.appendChild(actions);
+  section.appendChild(form);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    add.disabled = true;
+    try {
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: uname.input.value, displayName: dname.input.value, password: pass.input.value }),
+      });
+      if (res.ok) {
+        uname.input.value = dname.input.value = pass.input.value = '';
+        showMsg(t('saved'), true);
+        refresh();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showMsg(apiErrorMessage(data.error), false);
+      }
+    } catch (err) {
+      showMsg(t('err_generic'), false);
+    } finally {
+      add.disabled = false;
+    }
+  });
+
+  return section;
+}
+
+// Render the account rows (name, admin/you badges, @username, delete) into list.
+function renderUserList(list, users, refresh, showMsg) {
+  list.innerHTML = '';
+  users.forEach((u) => {
+    const row = document.createElement('div');
+    row.className = 'user-row';
+
+    const text = document.createElement('div');
+    text.className = 'user-row-text';
+    const name = document.createElement('span');
+    name.className = 'user-row-name';
+    name.textContent = u.displayName || u.username;
+    if (u.isAdmin) name.appendChild(badge(t('role_admin'), 'admin'));
+    if (state.user && u.id === state.user.id) name.appendChild(badge(t('you'), 'you'));
+    const sub = document.createElement('span');
+    sub.className = 'user-row-sub';
+    sub.textContent = '@' + u.username;
+    text.append(name, sub);
+    row.appendChild(text);
+
+    const del = iconButton('trash', t('remove'), async () => {
+      const self = state.user && u.id === state.user.id;
+      if (!confirm(self ? t('confirm_delete_self') : t('confirm_delete_user'))) return;
+      try {
+        const res = await fetch('/api/users/' + u.id, { method: 'DELETE' });
+        if (res.status === 204) {
+          if (self) { window.location.href = '/login'; return; }
+          refresh();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          showMsg(apiErrorMessage(data.error), false);
+        }
+      } catch (err) {
+        showMsg(t('err_generic'), false);
+      }
+    }, 'danger');
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+}
+
+function badge(label, kind) {
+  const b = document.createElement('span');
+  b.className = 'badge badge-' + kind;
+  b.textContent = label;
+  return b;
 }
 
 function passwordField(labelText, autocomplete) {
@@ -2521,14 +2702,60 @@ function passwordField(labelText, autocomplete) {
   return { field, input };
 }
 
-// Account: change the single-user password (current → new → confirm).
+function textField(labelText, value) {
+  const field = document.createElement('div');
+  field.className = 'field';
+  const id = 'tf-' + Math.random().toString(36).slice(2, 8);
+  const label = document.createElement('label');
+  label.setAttribute('for', id);
+  label.textContent = labelText;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = id;
+  input.value = value || '';
+  field.append(label, input);
+  return { field, input };
+}
+
+function fieldHint(text) {
+  const p = document.createElement('p');
+  p.className = 'field-hint';
+  p.textContent = text;
+  return p;
+}
+
+// Map a server error code (the JSON "error" field) to a localized message.
+function apiErrorMessage(code) {
+  const map = {
+    invalid_username: 'err_invalid_username',
+    weak_password: 'pw_too_short',
+    taken: 'err_taken',
+    last_user: 'err_last_user',
+    last_admin: 'err_last_admin',
+    current: 'pw_wrong_current',
+  };
+  return t(map[code] || 'err_generic');
+}
+
+// Reflect the logged-in account in the account menu (card + visible items).
+function updateAccountUI() {
+  const loggedIn = !!state.user;
+  accountProfileBtn.hidden = !loggedIn;
+  accountLogoutBtn.hidden = !loggedIn;
+  if (accountCard) {
+    accountCard.hidden = !loggedIn;
+    if (loggedIn) {
+      accountCardName.textContent = state.user.displayName || state.user.username;
+      accountCardSub.textContent = '@' + state.user.username;
+    }
+  }
+}
+
+// Account (Konto): username (read-only), display name, and a password change.
+// One Save updates the display name and/or the password (password optional).
 function openAccountDialog() {
   const { body, close } = buildDialog(t('account_title'));
-
-  const stitle = document.createElement('div');
-  stitle.className = 'dialog-section-title';
-  stitle.textContent = t('change_password');
-  body.appendChild(stitle);
+  const u = state.user || { username: '', displayName: '' };
 
   const msg = document.createElement('p');
   msg.className = 'dialog-msg';
@@ -2542,10 +2769,20 @@ function openAccountDialog() {
 
   const form = document.createElement('form');
   form.autocomplete = 'off';
+
+  const uname = textField(t('account_username'), '@' + u.username);
+  uname.input.disabled = true;
+  const dname = textField(t('display_name'), u.displayName || '');
+  dname.input.placeholder = t('display_name_ph');
+  form.append(uname.field, fieldHint(t('username_locked')), dname.field);
+
+  const pwTitle = document.createElement('div');
+  pwTitle.className = 'dialog-section-title';
+  pwTitle.textContent = t('change_password');
   const cur = passwordField(t('current_password'), 'current-password');
   const nw = passwordField(t('new_password'), 'new-password');
   const cf = passwordField(t('confirm_password'), 'new-password');
-  form.append(cur.field, nw.field, cf.field);
+  form.append(pwTitle, cur.field, nw.field, cf.field, fieldHint(t('password_optional')));
 
   const actions = document.createElement('div');
   actions.className = 'dialog-actions';
@@ -2564,37 +2801,49 @@ function openAccountDialog() {
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const currentPassword = cur.input.value;
-    const newPassword = nw.input.value;
-    const confirm = cf.input.value;
-    if (!currentPassword || !newPassword || !confirm) { showMsg(t('pw_required'), false); return; }
-    if (newPassword !== confirm) { showMsg(t('pw_mismatch'), false); return; }
-    if (newPassword.length < 4) { showMsg(t('pw_too_short'), false); return; }
     save.disabled = true;
+    let done = null; // success message to show on close
     try {
-      // Direct fetch (not api()) so a 401 = wrong current password, not a redirect.
-      const res = await fetch('/api/password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword, newPassword }),
-      });
-      if (res.ok) {
-        showMsg(t('pw_changed'), true);
-        cur.input.value = nw.input.value = cf.input.value = '';
-        setTimeout(close, 1200);
-        return;
+      // 1) Display name (only if it changed).
+      const newName = dname.input.value.trim();
+      if (state.user && newName !== (state.user.displayName || '')) {
+        const res = await fetch('/api/profile', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName: newName }),
+        });
+        if (!res.ok) { showMsg(t('err_generic'), false); return; }
+        const pu = await res.json().catch(() => null);
+        if (pu) { state.user = pu; updateAccountUI(); }
+        done = t('saved');
       }
-      if (res.status === 401) showMsg(t('pw_wrong_current'), false);
-      else if (res.status === 400) showMsg(t('pw_too_short'), false);
-      else showMsg(t('pw_error'), false);
+      // 2) Password (only if any password field is filled).
+      if (cur.input.value || nw.input.value || cf.input.value) {
+        if (!cur.input.value || !nw.input.value || !cf.input.value) { showMsg(t('pw_required'), false); return; }
+        if (nw.input.value !== cf.input.value) { showMsg(t('pw_mismatch'), false); return; }
+        if (nw.input.value.length < 4) { showMsg(t('pw_too_short'), false); return; }
+        const res = await fetch('/api/password', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentPassword: cur.input.value, newPassword: nw.input.value }),
+        });
+        if (res.ok) {
+          cur.input.value = nw.input.value = cf.input.value = '';
+          done = t('pw_changed');
+        } else {
+          const data = await res.json().catch(() => ({}));
+          showMsg(apiErrorMessage(data.error), false);
+          return;
+        }
+      }
+      if (done) { showMsg(done, true); setTimeout(close, 1200); }
+      else { close(); }
     } catch (err) {
-      showMsg(t('pw_error'), false);
+      showMsg(t('err_generic'), false);
     } finally {
       save.disabled = false;
     }
   });
 
-  cur.input.focus();
+  dname.input.focus();
 }
 
 // ===================================================================
@@ -2711,10 +2960,9 @@ async function init() {
   try {
     const cfg = await api('GET', '/config');
     state.authEnabled = cfg.authEnabled;
-    // The account (password) and log-out items only make sense with a login.
-    accountProfileBtn.hidden = !cfg.authEnabled;
-    accountLogoutBtn.hidden = !cfg.authEnabled;
+    state.user = cfg.user || null;
   } catch (err) { /* ignore */ }
+  updateAccountUI();
 
   renderNav();
   renderLabels();

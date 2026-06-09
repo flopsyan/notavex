@@ -1,105 +1,162 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestNewAuthBootstrapAndVerify(t *testing.T) {
-	dir := t.TempDir()
-	a, err := newAuth("hunter2", false, dir)
+func newTestUsers(t *testing.T) *UserStore {
+	t.Helper()
+	us, err := NewUserStore(filepath.Join(t.TempDir(), "users.json"))
 	if err != nil {
-		t.Fatalf("newAuth: %v", err)
+		t.Fatalf("NewUserStore: %v", err)
 	}
-	if !a.enabled {
-		t.Fatal("auth should be enabled after bootstrap")
+	return us
+}
+
+func TestUserCreateAndAuthenticate(t *testing.T) {
+	us := newTestUsers(t)
+	if _, err := us.Create("alice", "Alice", "hunter2", true); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
-	if !a.verifyPassword("hunter2") {
-		t.Error("correct password should verify")
+	if us.Count() != 1 {
+		t.Fatalf("Count = %d, want 1", us.Count())
 	}
-	if a.verifyPassword("wrong") {
-		t.Error("wrong password should not verify")
+	u, ok := us.Authenticate("alice", "hunter2")
+	if !ok || u.Username != "alice" || !u.IsAdmin {
+		t.Fatalf("Authenticate failed: ok=%v u=%+v", ok, u)
+	}
+	if _, ok := us.Authenticate("alice", "wrong"); ok {
+		t.Error("wrong password should not authenticate")
+	}
+	if _, ok := us.Authenticate("ALICE", "hunter2"); !ok {
+		t.Error("username match should be case-insensitive")
+	}
+	if _, ok := us.Authenticate("bob", "hunter2"); ok {
+		t.Error("unknown user should not authenticate")
 	}
 }
 
-func TestNewAuthDisabledWithoutPassword(t *testing.T) {
-	a, err := newAuth("", false, t.TempDir())
-	if err != nil {
-		t.Fatalf("newAuth: %v", err)
+func TestUserCreateValidation(t *testing.T) {
+	us := newTestUsers(t)
+	if _, err := us.Create("a b", "x", "password", false); err != ErrInvalidUsername {
+		t.Errorf("invalid username: got %v, want ErrInvalidUsername", err)
 	}
-	if a.enabled {
-		t.Error("auth should be disabled without a configured or stored password")
+	if _, err := us.Create("bob", "x", "ab", false); err != ErrWeakPassword {
+		t.Errorf("weak password: got %v, want ErrWeakPassword", err)
 	}
-}
-
-func TestStoredPasswordWinsOverEnv(t *testing.T) {
-	dir := t.TempDir()
-	a, err := newAuth("first", false, dir)
-	if err != nil {
-		t.Fatalf("newAuth: %v", err)
+	if _, err := us.Create("bob", "Bob", "password", false); err != nil {
+		t.Fatalf("create bob: %v", err)
 	}
-	if err := a.setPassword("changed-in-ui"); err != nil {
-		t.Fatalf("setPassword: %v", err)
-	}
-
-	// A fresh start with a *different* env password must keep the stored one.
-	b, err := newAuth("a-different-env-password", false, dir)
-	if err != nil {
-		t.Fatalf("newAuth (restart): %v", err)
-	}
-	if !b.verifyPassword("changed-in-ui") {
-		t.Error("stored password should survive restart and win over env")
-	}
-	if b.verifyPassword("a-different-env-password") {
-		t.Error("env password must not override a stored one")
+	if _, err := us.Create("BOB", "Bob2", "password", false); err != ErrUsernameTaken {
+		t.Errorf("duplicate (case-insensitive) username: got %v, want ErrUsernameTaken", err)
 	}
 }
 
-func TestTokenRoundTripAndTamper(t *testing.T) {
-	a, err := newAuth("pw", false, t.TempDir())
+func TestChangePassword(t *testing.T) {
+	us := newTestUsers(t)
+	pu, _ := us.Create("alice", "Alice", "oldpass", true)
+	if err := us.ChangePassword(pu.ID, "ab"); err != ErrWeakPassword {
+		t.Errorf("weak new password: got %v", err)
+	}
+	if err := us.ChangePassword(pu.ID, "newpass1"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if _, ok := us.Authenticate("alice", "oldpass"); ok {
+		t.Error("old password should no longer work")
+	}
+	if _, ok := us.Authenticate("alice", "newpass1"); !ok {
+		t.Error("new password should work")
+	}
+}
+
+func TestDeleteGuards(t *testing.T) {
+	us := newTestUsers(t)
+	admin, _ := us.Create("admin", "Admin", "password", true)
+	if err := us.Delete(admin.ID); err != ErrLastUser {
+		t.Errorf("delete last user: got %v, want ErrLastUser", err)
+	}
+	bob, _ := us.Create("bob", "Bob", "password", false)
+	if err := us.Delete(admin.ID); err != ErrLastAdmin {
+		t.Errorf("delete last admin: got %v, want ErrLastAdmin", err)
+	}
+	if err := us.Delete(bob.ID); err != nil {
+		t.Errorf("delete normal user: got %v", err)
+	}
+}
+
+func TestUsersPersistAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "users.json")
+	us, err := NewUserStore(path)
+	if err != nil {
+		t.Fatalf("NewUserStore: %v", err)
+	}
+	if _, err := us.Create("alice", "Alice", "hunter2", true); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	us2, err := NewUserStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if us2.Count() != 1 {
+		t.Fatalf("Count after reopen = %d, want 1", us2.Count())
+	}
+	if _, ok := us2.Authenticate("alice", "hunter2"); !ok {
+		t.Error("password should survive reopen")
+	}
+}
+
+func TestSessionTokenRoundTripAndTamper(t *testing.T) {
+	us := newTestUsers(t)
+	us.Create("alice", "Alice", "hunter2", true)
+	u, _ := us.Authenticate("alice", "hunter2")
+	a, err := newAuth(us, false, t.TempDir())
 	if err != nil {
 		t.Fatalf("newAuth: %v", err)
 	}
-	tok := a.issueToken(time.Now().Add(time.Hour))
-	if !a.validToken(tok) {
-		t.Error("freshly issued token should be valid")
+	tok := a.issueToken(u, time.Now().Add(time.Hour))
+	if got := a.userFromToken(tok); got == nil || got.ID != u.ID {
+		t.Fatalf("round-trip failed: %v", got)
 	}
-	if a.validToken(tok + "x") {
+	if a.userFromToken(tok+"x") != nil {
 		t.Error("tampered token should be rejected")
 	}
-	if a.validToken(a.issueToken(time.Now().Add(-time.Minute))) {
+	if a.userFromToken(a.issueToken(u, time.Now().Add(-time.Minute))) != nil {
 		t.Error("expired token should be rejected")
 	}
 }
 
-func TestPasswordChangeInvalidatesSessions(t *testing.T) {
-	a, err := newAuth("pw", false, t.TempDir())
-	if err != nil {
-		t.Fatalf("newAuth: %v", err)
-	}
-	tok := a.issueToken(time.Now().Add(time.Hour))
-	if !a.validToken(tok) {
+func TestPasswordChangeInvalidatesSession(t *testing.T) {
+	us := newTestUsers(t)
+	pu, _ := us.Create("alice", "Alice", "hunter2", true)
+	u, _ := us.Authenticate("alice", "hunter2")
+	a, _ := newAuth(us, false, t.TempDir())
+	tok := a.issueToken(u, time.Now().Add(time.Hour))
+	if a.userFromToken(tok) == nil {
 		t.Fatal("token should start valid")
 	}
-	if err := a.setPassword("new-password"); err != nil {
-		t.Fatalf("setPassword: %v", err)
+	if err := us.ChangePassword(pu.ID, "newpass1"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
 	}
-	if a.validToken(tok) {
-		t.Error("changing the password must invalidate previously issued tokens")
+	if a.userFromToken(tok) != nil {
+		t.Error("changing the password must invalidate existing tokens")
 	}
-	// A token issued after the change is valid again.
-	if !a.validToken(a.issueToken(time.Now().Add(time.Hour))) {
-		t.Error("token issued after change should be valid")
+	u2, _ := us.Authenticate("alice", "newpass1")
+	if a.userFromToken(a.issueToken(u2, time.Now().Add(time.Hour))) == nil {
+		t.Error("token issued after the change should be valid")
 	}
 }
 
-func TestSetPasswordRejectsTooShort(t *testing.T) {
-	a, err := newAuth("pw", false, t.TempDir())
-	if err != nil {
-		t.Fatalf("newAuth: %v", err)
+func TestAuthEnabledFollowsAccounts(t *testing.T) {
+	us := newTestUsers(t)
+	a, _ := newAuth(us, false, t.TempDir())
+	if a.enabled() {
+		t.Error("auth should be disabled with no accounts")
 	}
-	if err := a.setPassword("ab"); err != ErrWeakPassword {
-		t.Errorf("setPassword(short) = %v, want ErrWeakPassword", err)
+	us.Create("alice", "Alice", "hunter2", true)
+	if !a.enabled() {
+		t.Error("auth should be enabled once an account exists")
 	}
 }
 

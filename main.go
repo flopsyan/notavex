@@ -38,15 +38,36 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 
-	auth, err := newAuth(password, secure, dataDir)
+	users, err := NewUserStore(filepath.Join(dataDir, "users.json"))
+	if err != nil {
+		log.Fatalf("open user store: %v", err)
+	}
+
+	auth, err := newAuth(users, secure, dataDir)
 	if err != nil {
 		log.Fatalf("init auth: %v", err)
 	}
-	if auth.enabled {
-		log.Print("authentication: ENABLED (single-user password login)")
+
+	// On first run, seed the first admin account: migrate a legacy single-user
+	// password if present, otherwise bootstrap one from NOTAVEX_PASSWORD.
+	if users.Count() == 0 {
+		switch {
+		case migrateLegacyPassword(users, dataDir):
+			log.Print(`authentication: migrated the existing password into an admin account`)
+		case password != "":
+			username := envOr("NOTAVEX_USER", "admin")
+			if _, err := users.Create(username, username, password, true); err != nil {
+				log.Fatalf("bootstrap admin %q: %v", username, err)
+			}
+			log.Printf("authentication: bootstrapped admin account %q from NOTAVEX_PASSWORD", username)
+		}
+	}
+
+	if auth.enabled() {
+		log.Printf("authentication: ENABLED — %d account(s); login required.", users.Count())
 	} else {
-		log.Print("authentication: DISABLED — set NOTAVEX_PASSWORD to require a login. " +
-			"Do not expose Notavex to the internet without it!")
+		log.Print("authentication: DISABLED — set NOTAVEX_PASSWORD (and optionally NOTAVEX_USER) " +
+			"to create the admin account and require a login. Do not expose Notavex without it!")
 	}
 
 	static, err := fs.Sub(webFS, "web")
@@ -84,4 +105,22 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// migrateLegacyPassword converts a legacy single-user auth.json into the first
+// admin account ("admin", or NOTAVEX_USER). Returns true if a migration ran.
+func migrateLegacyPassword(users *UserStore, dataDir string) bool {
+	path := filepath.Join(dataDir, "auth.json")
+	cred, err := loadLegacyCredentials(path)
+	if err != nil || cred == nil {
+		return false
+	}
+	username := envOr("NOTAVEX_USER", "admin")
+	if err := users.createWithHash(username, username, cred.Hash, cred.Salt, cred.Iter, true); err != nil {
+		log.Printf("could not migrate legacy password: %v", err)
+		return false
+	}
+	// Rename so it is clearly superseded and never picked up again.
+	_ = os.Rename(path, path+".migrated")
+	return true
 }

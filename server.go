@@ -43,11 +43,15 @@ func (s *Server) Routes() http.Handler {
 	// Static assets (CSS/JS) are always public.
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(s.static)))
 
-	// Auth + meta endpoints.
+	// Auth + account endpoints.
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
-	mux.HandleFunc("POST /api/password", s.requireAuth(s.handlePassword))
 	mux.HandleFunc("GET /api/config", s.handleConfig)
+	mux.HandleFunc("POST /api/password", s.requireAuth(s.handlePassword))
+	mux.HandleFunc("POST /api/profile", s.requireAuth(s.handleProfile))
+	mux.HandleFunc("GET /api/users", s.requireAuth(s.handleListUsers))
+	mux.HandleFunc("POST /api/users", s.requireAdmin(s.handleCreateUser))
+	mux.HandleFunc("DELETE /api/users/{id}", s.requireAdmin(s.handleDeleteUser))
 
 	// Memo API (requires authentication when enabled).
 	mux.HandleFunc("GET /api/memos", s.requireAuth(s.handleListMemos))
@@ -102,19 +106,28 @@ func (s *Server) withCommon(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) authed(r *http.Request) bool {
-	c, err := r.Cookie(sessionCookie)
-	if err != nil {
-		return false
-	}
-	return s.auth.validToken(c.Value)
-}
-
-// requireAuth guards JSON API handlers, returning 401 when a login is required.
+// requireAuth guards JSON API handlers, returning 401 when a login is required
+// (i.e. accounts exist) and the request carries no valid session.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.auth.enabled && !s.authed(r) {
+		if s.auth.enabled() && s.auth.currentUser(r) == nil {
 			writeJSONError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// requireAdmin guards admin-only JSON API handlers (user management).
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u := s.auth.currentUser(r)
+		if u == nil {
+			writeJSONError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		if !u.IsAdmin {
+			writeJSONError(w, http.StatusForbidden, "admin only")
 			return
 		}
 		next(w, r)
@@ -124,7 +137,7 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 // ---------- pages ----------
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if s.auth.enabled && !s.authed(r) {
+	if s.auth.enabled() && s.auth.currentUser(r) == nil {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
@@ -132,7 +145,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
-	if !s.auth.enabled || s.authed(r) {
+	if !s.auth.enabled() || s.auth.currentUser(r) != nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -155,74 +168,28 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 	w.Write(data)
 }
 
-// ---------- auth handlers ----------
+// ---------- auth + account handlers ----------
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !s.auth.enabled {
+	if !s.auth.enabled() {
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
 	var req struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
-	if !s.auth.verifyPassword(req.Password) {
-		writeJSONError(w, http.StatusUnauthorized, "wrong password")
+	u, ok := s.auth.users.Authenticate(req.Username, req.Password)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "wrong username or password")
 		return
 	}
-	s.setSessionCookie(w)
+	s.setSessionCookie(w, u)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-// handlePassword changes the single-user password. It verifies the current
-// password, stores the new one and re-issues the session cookie (the old token
-// is invalidated because it was bound to the previous hash), so the user stays
-// logged in.
-func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
-	if !s.auth.enabled {
-		writeJSONError(w, http.StatusBadRequest, "login is not enabled")
-		return
-	}
-	var req struct {
-		CurrentPassword string `json:"currentPassword"`
-		NewPassword     string `json:"newPassword"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request")
-		return
-	}
-	if !s.auth.verifyPassword(req.CurrentPassword) {
-		writeJSONError(w, http.StatusUnauthorized, "current password is wrong")
-		return
-	}
-	if err := s.auth.setPassword(req.NewPassword); err != nil {
-		if errors.Is(err, ErrWeakPassword) {
-			writeJSONError(w, http.StatusBadRequest, "password too short")
-			return
-		}
-		writeJSONError(w, http.StatusInternalServerError, "could not change password")
-		return
-	}
-	s.setSessionCookie(w)
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-// setSessionCookie issues a fresh, hash-bound session cookie.
-func (s *Server) setSessionCookie(w http.ResponseWriter) {
-	expiry := time.Now().Add(sessionMaxAge)
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    s.auth.issueToken(expiry),
-		Path:     "/",
-		Expires:  expiry,
-		MaxAge:   int(sessionMaxAge.Seconds()),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   s.auth.secure,
-	})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -239,10 +206,146 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{
-		"authEnabled": s.auth.enabled,
-		"authed":      !s.auth.enabled || s.authed(r),
+	u := s.auth.currentUser(r)
+	resp := map[string]any{
+		"authEnabled": s.auth.enabled(),
+		"authed":      !s.auth.enabled() || u != nil,
+		"user":        nil,
+	}
+	if u != nil {
+		resp["user"] = u.public()
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handlePassword changes the logged-in user's own password. It verifies the
+// current password, stores the new one and re-issues the session cookie (the old
+// token is invalidated because it was bound to the previous hash), so the user
+// stays logged in.
+func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
+	u := s.auth.currentUser(r)
+	if u == nil {
+		writeJSONError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if !verifySaltedHash(req.CurrentPassword, u.PassHash, u.PassSalt, u.Iter) {
+		writeJSONError(w, http.StatusUnauthorized, "current")
+		return
+	}
+	if err := s.auth.users.ChangePassword(u.ID, req.NewPassword); err != nil {
+		if errors.Is(err, ErrWeakPassword) {
+			writeJSONError(w, http.StatusBadRequest, "weak_password")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "error")
+		return
+	}
+	if nu, ok := s.auth.users.ByID(u.ID); ok {
+		s.setSessionCookie(w, nu)
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleProfile updates the logged-in user's own display name.
+func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	u := s.auth.currentUser(r)
+	if u == nil {
+		writeJSONError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req struct {
+		DisplayName string `json:"displayName"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	pu, err := s.auth.users.UpdateDisplayName(u.ID, req.DisplayName)
+	if err != nil {
+		s.writeUserError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pu)
+}
+
+func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.auth.users.List())
+}
+
+// handleCreateUser adds a new (non-admin) account. Admin-only.
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username    string `json:"username"`
+		DisplayName string `json:"displayName"`
+		Password    string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	pu, err := s.auth.users.Create(req.Username, req.DisplayName, req.Password, false)
+	if err != nil {
+		s.writeUserError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, pu)
+}
+
+// handleDeleteUser removes an account. Admin-only.
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.auth.users.Delete(id); err != nil {
+		s.writeUserError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// setSessionCookie issues a fresh, hash-bound session cookie for u.
+func (s *Server) setSessionCookie(w http.ResponseWriter, u *User) {
+	expiry := time.Now().Add(sessionMaxAge)
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    s.auth.issueToken(u, expiry),
+		Path:     "/",
+		Expires:  expiry,
+		MaxAge:   int(sessionMaxAge.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   s.auth.secure,
 	})
+}
+
+// writeUserError maps a user-store error to an HTTP status + a stable error code
+// the browser maps to a localized message.
+func (s *Server) writeUserError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrInvalidUsername):
+		writeJSONError(w, http.StatusBadRequest, "invalid_username")
+	case errors.Is(err, ErrWeakPassword):
+		writeJSONError(w, http.StatusBadRequest, "weak_password")
+	case errors.Is(err, ErrUsernameTaken):
+		writeJSONError(w, http.StatusConflict, "taken")
+	case errors.Is(err, ErrLastUser):
+		writeJSONError(w, http.StatusBadRequest, "last_user")
+	case errors.Is(err, ErrLastAdmin):
+		writeJSONError(w, http.StatusBadRequest, "last_admin")
+	case errors.Is(err, ErrUserNotFound):
+		writeJSONError(w, http.StatusNotFound, "not_found")
+	default:
+		writeJSONError(w, http.StatusInternalServerError, "error")
+	}
 }
 
 // ---------- memo handlers ----------

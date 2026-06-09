@@ -9,7 +9,10 @@ services:
       - "8080:8080"
     environment:
       NOTAVEX_ADDR: ":8080"
-      # Uncomment to require a login (recommended if reachable from the internet):
+      # Uncomment to require a login (recommended if reachable from the internet).
+      # On first start these create the admin account; manage further users in the
+      # app under Settings. Afterwards they are ignored.
+      # NOTAVEX_USER: "admin"
       # NOTAVEX_PASSWORD: "change-me-please"
       # Set to "true" if a reverse proxy terminates HTTPS in front of Notavex:
       # NOTAVEX_SECURE: "true"
