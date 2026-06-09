@@ -1,18 +1,14 @@
 package main
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -21,46 +17,11 @@ const (
 	sessionMaxAge = 30 * 24 * time.Hour
 	maxContentLen = 1 << 20 // 1 MiB per memo
 	maxTitleLen   = 1024    // characters in a memo title
+	maxImages     = 12      // images attached to a single memo
+	maxImageBytes = 2 << 20 // 2 MiB per image (base64 data URL length)
+	// Upper bound on a create/update request body: content + all images + slack.
+	maxMemoBody = maxContentLen + maxImages*maxImageBytes + 8192
 )
-
-// Auth holds single-user authentication state. When enabled is false the whole
-// app is open and no login is required.
-type Auth struct {
-	enabled  bool
-	password string
-	secret   []byte
-	secure   bool // mark the session cookie Secure (serve only over HTTPS)
-}
-
-// sign returns the hex-encoded HMAC-SHA256 of msg using the server secret.
-func (a *Auth) sign(msg string) string {
-	mac := hmac.New(sha256.New, a.secret)
-	mac.Write([]byte(msg))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-// issueToken creates a signed session token that is valid until expiry.
-func (a *Auth) issueToken(expiry time.Time) string {
-	exp := strconv.FormatInt(expiry.Unix(), 10)
-	return exp + "." + a.sign(exp)
-}
-
-// validToken reports whether token carries a valid, unexpired signature.
-func (a *Auth) validToken(token string) bool {
-	exp, mac, ok := strings.Cut(token, ".")
-	if !ok {
-		return false
-	}
-	expected := a.sign(exp)
-	if subtle.ConstantTimeCompare([]byte(mac), []byte(expected)) != 1 {
-		return false
-	}
-	unix, err := strconv.ParseInt(exp, 10, 64)
-	if err != nil {
-		return false
-	}
-	return time.Now().Unix() < unix
-}
 
 // Server wires the HTTP API and the embedded web UI to the store.
 type Server struct {
@@ -85,6 +46,7 @@ func (s *Server) Routes() http.Handler {
 	// Auth + meta endpoints.
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	mux.HandleFunc("POST /api/password", s.requireAuth(s.handlePassword))
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 
 	// Memo API (requires authentication when enabled).
@@ -207,10 +169,49 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.auth.password)) != 1 {
+	if !s.auth.verifyPassword(req.Password) {
 		writeJSONError(w, http.StatusUnauthorized, "wrong password")
 		return
 	}
+	s.setSessionCookie(w)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handlePassword changes the single-user password. It verifies the current
+// password, stores the new one and re-issues the session cookie (the old token
+// is invalidated because it was bound to the previous hash), so the user stays
+// logged in.
+func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
+	if !s.auth.enabled {
+		writeJSONError(w, http.StatusBadRequest, "login is not enabled")
+		return
+	}
+	var req struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if !s.auth.verifyPassword(req.CurrentPassword) {
+		writeJSONError(w, http.StatusUnauthorized, "current password is wrong")
+		return
+	}
+	if err := s.auth.setPassword(req.NewPassword); err != nil {
+		if errors.Is(err, ErrWeakPassword) {
+			writeJSONError(w, http.StatusBadRequest, "password too short")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "could not change password")
+		return
+	}
+	s.setSessionCookie(w)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// setSessionCookie issues a fresh, hash-bound session cookie.
+func (s *Server) setSessionCookie(w http.ResponseWriter) {
 	expiry := time.Now().Add(sessionMaxAge)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -222,7 +223,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Secure:   s.auth.secure,
 	})
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -265,8 +265,9 @@ func (s *Server) handleCreateMemo(w http.ResponseWriter, r *http.Request) {
 		Color     string   `json:"color"`
 		Labels    []string `json:"labels"`
 		Checklist bool     `json:"checklist"`
+		Images    []string `json:"images"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentLen+4096)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMemoBody)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -282,12 +283,17 @@ func (s *Server) handleCreateMemo(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid color")
 		return
 	}
+	if err := validateImages(req.Images); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	m, err := s.store.Create(NewMemo{
 		Title:     req.Title,
 		Content:   req.Content,
 		Color:     req.Color,
 		Labels:    req.Labels,
 		Checklist: req.Checklist,
+		Images:    req.Images,
 	})
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -319,8 +325,9 @@ func (s *Server) handleUpdateMemo(w http.ResponseWriter, r *http.Request) {
 		Content   *string   `json:"content"`
 		Labels    *[]string `json:"labels"`
 		Checklist *bool     `json:"checklist"`
+		Images    *[]string `json:"images"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxContentLen+4096)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMemoBody)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -332,11 +339,18 @@ func (s *Server) handleUpdateMemo(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "title too large")
 		return
 	}
+	if req.Images != nil {
+		if err := validateImages(*req.Images); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	m, err := s.store.Update(id, UpdateMemo{
 		Title:     req.Title,
 		Content:   req.Content,
 		Labels:    req.Labels,
 		Checklist: req.Checklist,
+		Images:    req.Images,
 	})
 	if err != nil {
 		s.writeStoreError(w, err)
@@ -535,6 +549,28 @@ var allowedColors = map[string]bool{
 }
 
 func validColor(c string) bool { return allowedColors[c] }
+
+// imageDataURL matches a base64-encoded image data URL — the only image form the
+// browser produces. Anything else (e.g. javascript:/http(s): URLs) is rejected so
+// the value is safe to drop straight into an <img src>.
+var imageDataURL = regexp.MustCompile(`^data:image/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$`)
+
+// validateImages checks an attachment list: at most maxImages entries, each a
+// well-formed image data URL no larger than maxImageBytes.
+func validateImages(images []string) error {
+	if len(images) > maxImages {
+		return errors.New("too many images")
+	}
+	for _, img := range images {
+		if len(img) > maxImageBytes {
+			return errors.New("image too large")
+		}
+		if !imageDataURL.MatchString(img) {
+			return errors.New("invalid image")
+		}
+	}
+	return nil
+}
 
 func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

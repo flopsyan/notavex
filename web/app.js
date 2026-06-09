@@ -4,20 +4,254 @@
 // Notavex — Google Keep-style notes UI
 // ===================================================================
 
+// ===================================================================
+// i18n (English / German). The default language follows the browser/system
+// language (German for "de…", English otherwise) until the user picks one in
+// Settings, which is stored in localStorage. README/code stay English; only the
+// UI is translated. Note content is user data and shown as entered.
+// ===================================================================
+
+const STRINGS = {
+  en: {
+    menu_toggle: 'Toggle menu',
+    search_ph: 'Search your notes',
+    account_menu: 'Account',
+    menu_account: 'Account',
+    menu_settings: 'Settings',
+    logout: 'Log out',
+    nav_labels: 'Labels',
+    section_pinned: 'Pinned',
+    section_others: 'Others',
+    // composer
+    composer_take_note: 'Take a note…',
+    composer_title: 'Title',
+    composer_note: 'Take a note…  (Markdown & tables supported)',
+    composer_new_list: 'New list',
+    composer_new_numlist: 'New numbered list',
+    add_label: 'Add label',
+    checklist: 'Checklist',
+    image_add: 'Add image',
+    image_remove: 'Remove image',
+    preview: 'Preview',
+    edit: 'Edit',
+    close: 'Close',
+    nothing_preview: 'Nothing to preview.',
+    // views + labels
+    view_notes: 'Notes',
+    view_archive: 'Archive',
+    view_trash: 'Trash',
+    no_labels: 'No labels yet',
+    label_note: 'Label note',
+    create_label: 'Create label',
+    list_item: 'List item',
+    delete_item: 'Delete item',
+    remove_label: 'Remove label',
+    // card actions
+    pin: 'Pin',
+    unpin: 'Unpin',
+    bg_color: 'Background color',
+    archive: 'Archive',
+    unarchive: 'Unarchive',
+    more: 'More',
+    restore: 'Restore',
+    delete_forever: 'Delete forever',
+    make_copy: 'Make a copy',
+    delete: 'Delete',
+    completed_one: '{n} completed item',
+    completed_many: '{n} completed items',
+    // board / empty / confirms
+    trash_note: 'Notes in Trash are deleted after they are emptied.',
+    empty_trash: 'Empty trash',
+    empty_no_match: 'No matching notes.',
+    empty_archive: 'Your archive is empty.',
+    empty_trash_state: 'Trash is empty.',
+    empty_notes: 'Notes you add appear here.',
+    confirm_delete_forever: 'Delete this note forever? This cannot be undone.',
+    confirm_empty_trash: 'Empty trash? All notes in trash will be permanently deleted.',
+    // relative time
+    just_now: 'just now',
+    minutes_ago: '{n}m ago',
+    hours_ago: '{n}h ago',
+    days_ago: '{n}d ago',
+    // colors
+    color_default: 'Default',
+    color_coral: 'Coral',
+    color_peach: 'Peach',
+    color_sand: 'Sand',
+    color_mint: 'Mint',
+    color_sage: 'Sage',
+    color_fog: 'Fog',
+    color_storm: 'Storm',
+    color_dusk: 'Dusk',
+    color_blossom: 'Blossom',
+    color_clay: 'Clay',
+    color_chalk: 'Chalk',
+    // settings dialog
+    settings_title: 'Settings',
+    appearance: 'Appearance',
+    color_theme: 'Color theme',
+    theme_system: 'System',
+    theme_light: 'Light',
+    theme_dark: 'Dark',
+    language: 'Language',
+    // account dialog
+    account_title: 'Account',
+    change_password: 'Change password',
+    current_password: 'Current password',
+    new_password: 'New password',
+    confirm_password: 'Confirm password',
+    save: 'Save',
+    cancel: 'Cancel',
+    pw_changed: 'Password changed.',
+    pw_mismatch: 'New passwords do not match.',
+    pw_too_short: 'Password too short (min. 4 characters).',
+    pw_wrong_current: 'Current password is wrong.',
+    pw_required: 'Please fill in all fields.',
+    pw_error: 'Could not change the password.',
+  },
+  de: {
+    menu_toggle: 'Menü ein-/ausklappen',
+    search_ph: 'Notizen durchsuchen',
+    account_menu: 'Konto',
+    menu_account: 'Konto',
+    menu_settings: 'Einstellungen',
+    logout: 'Abmelden',
+    nav_labels: 'Labels',
+    section_pinned: 'Angepinnt',
+    section_others: 'Sonstige',
+    composer_take_note: 'Notiz schreiben…',
+    composer_title: 'Titel',
+    composer_note: 'Notiz schreiben…  (Markdown & Tabellen werden unterstützt)',
+    composer_new_list: 'Neue Liste',
+    composer_new_numlist: 'Neue nummerierte Liste',
+    add_label: 'Label hinzufügen',
+    checklist: 'Checkliste',
+    image_add: 'Bild hinzufügen',
+    image_remove: 'Bild entfernen',
+    preview: 'Vorschau',
+    edit: 'Bearbeiten',
+    close: 'Schließen',
+    nothing_preview: 'Nichts zum Anzeigen.',
+    view_notes: 'Notizen',
+    view_archive: 'Archiv',
+    view_trash: 'Papierkorb',
+    no_labels: 'Noch keine Labels',
+    label_note: 'Notiz mit Label versehen',
+    create_label: 'Label erstellen',
+    list_item: 'Listeneintrag',
+    delete_item: 'Eintrag löschen',
+    remove_label: 'Label entfernen',
+    pin: 'Anpinnen',
+    unpin: 'Lösen',
+    bg_color: 'Hintergrundfarbe',
+    archive: 'Archivieren',
+    unarchive: 'Aus dem Archiv',
+    more: 'Mehr',
+    restore: 'Wiederherstellen',
+    delete_forever: 'Endgültig löschen',
+    make_copy: 'Kopie erstellen',
+    delete: 'Löschen',
+    completed_one: '{n} erledigter Eintrag',
+    completed_many: '{n} erledigte Einträge',
+    trash_note: 'Notizen im Papierkorb werden beim Leeren gelöscht.',
+    empty_trash: 'Papierkorb leeren',
+    empty_no_match: 'Keine passenden Notizen.',
+    empty_archive: 'Dein Archiv ist leer.',
+    empty_trash_state: 'Der Papierkorb ist leer.',
+    empty_notes: 'Notizen, die du hinzufügst, erscheinen hier.',
+    confirm_delete_forever: 'Diese Notiz endgültig löschen? Das kann nicht rückgängig gemacht werden.',
+    confirm_empty_trash: 'Papierkorb leeren? Alle Notizen im Papierkorb werden endgültig gelöscht.',
+    just_now: 'gerade eben',
+    minutes_ago: 'vor {n} Min.',
+    hours_ago: 'vor {n} Std.',
+    days_ago: 'vor {n} T.',
+    color_default: 'Standard',
+    color_coral: 'Koralle',
+    color_peach: 'Pfirsich',
+    color_sand: 'Sand',
+    color_mint: 'Minze',
+    color_sage: 'Salbei',
+    color_fog: 'Nebel',
+    color_storm: 'Sturm',
+    color_dusk: 'Dämmerung',
+    color_blossom: 'Blüte',
+    color_clay: 'Lehm',
+    color_chalk: 'Kreide',
+    settings_title: 'Einstellungen',
+    appearance: 'Darstellung',
+    color_theme: 'Farbschema',
+    theme_system: 'System',
+    theme_light: 'Hell',
+    theme_dark: 'Dunkel',
+    language: 'Sprache',
+    account_title: 'Konto',
+    change_password: 'Passwort ändern',
+    current_password: 'Aktuelles Passwort',
+    new_password: 'Neues Passwort',
+    confirm_password: 'Passwort bestätigen',
+    save: 'Speichern',
+    cancel: 'Abbrechen',
+    pw_changed: 'Passwort geändert.',
+    pw_mismatch: 'Die neuen Passwörter stimmen nicht überein.',
+    pw_too_short: 'Passwort zu kurz (mind. 4 Zeichen).',
+    pw_wrong_current: 'Aktuelles Passwort ist falsch.',
+    pw_required: 'Bitte alle Felder ausfüllen.',
+    pw_error: 'Passwort konnte nicht geändert werden.',
+  },
+};
+
+function detectLang() {
+  try {
+    const stored = localStorage.getItem('notavex-lang');
+    if (stored === 'en' || stored === 'de') return stored;
+  } catch (e) { /* localStorage unavailable */ }
+  const langs = navigator.languages && navigator.languages.length
+    ? navigator.languages : [navigator.language || 'en'];
+  return langs.some((l) => /^de\b/i.test(l)) ? 'de' : 'en';
+}
+
+let lang = detectLang();
+
+// t(key, vars?) -> translated string with optional {name} interpolation.
+function t(key, vars) {
+  let s = (STRINGS[lang] && STRINGS[lang][key]) ?? STRINGS.en[key] ?? key;
+  if (vars) for (const k in vars) s = s.replace('{' + k + '}', vars[k]);
+  return s;
+}
+
+// Translate the static markup carrying data-i18n* attributes.
+function applyI18n() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+  document.querySelectorAll('[data-i18n-aria]').forEach((el) => { el.setAttribute('aria-label', t(el.dataset.i18nAria)); });
+}
+
+// Persist a language choice and reload so every string is re-rendered.
+function setLang(next) {
+  if (next !== 'en' && next !== 'de') return;
+  try { localStorage.setItem('notavex-lang', next); } catch (e) { /* ignore */ }
+  if (next !== lang) location.reload();
+}
+
 const COLORS = [
-  { name: '', label: 'Default' },
-  { name: 'coral', label: 'Coral' },
-  { name: 'peach', label: 'Peach' },
-  { name: 'sand', label: 'Sand' },
-  { name: 'mint', label: 'Mint' },
-  { name: 'sage', label: 'Sage' },
-  { name: 'fog', label: 'Fog' },
-  { name: 'storm', label: 'Storm' },
-  { name: 'dusk', label: 'Dusk' },
-  { name: 'blossom', label: 'Blossom' },
-  { name: 'clay', label: 'Clay' },
-  { name: 'chalk', label: 'Chalk' },
+  { name: '', label: 'color_default' },
+  { name: 'coral', label: 'color_coral' },
+  { name: 'peach', label: 'color_peach' },
+  { name: 'sand', label: 'color_sand' },
+  { name: 'mint', label: 'color_mint' },
+  { name: 'sage', label: 'color_sage' },
+  { name: 'fog', label: 'color_fog' },
+  { name: 'storm', label: 'color_storm' },
+  { name: 'dusk', label: 'color_dusk' },
+  { name: 'blossom', label: 'color_blossom' },
+  { name: 'clay', label: 'color_clay' },
+  { name: 'chalk', label: 'color_chalk' },
 ];
+
+const MAX_IMAGES = 12;       // keep in sync with the server's maxImages
+const IMAGE_MAX_EDGE = 1600; // longest edge after in-browser downscale
 
 // view: 'active' | 'archived' | 'trash'
 const state = { authEnabled: false, all: [], query: '', label: '', view: 'active' };
@@ -27,6 +261,7 @@ let composerColor = '';
 let composerLabels = [];
 let composerChecklist = false;
 let composerItems = []; // [{checked,text}] when the composer is in checklist mode
+let composerImages = []; // data URLs of images attached to the note being drafted
 
 let stats = { notes: 0, archived: 0, trashed: 0, labels: 0 };
 let labels = []; // [{name, count}] from /api/labels
@@ -36,8 +271,12 @@ let grids = []; // [{ container, cards }] — kept so we can re-layout on resize
 // ---------- DOM refs ----------
 const $ = (s) => document.querySelector(s);
 const searchInput = $('#search');
-const themeToggle = $('#theme-toggle');
-const logoutBtn = $('#logout');
+const accountWrap = $('#account');
+const accountBtn = $('#account-btn');
+const accountMenu = $('#account-menu');
+const accountProfileBtn = $('#account-profile');
+const accountSettingsBtn = $('#account-settings');
+const accountLogoutBtn = $('#account-logout');
 const navToggle = $('#nav-toggle');
 const sidebar = $('#sidebar');
 const scrim = $('#scrim');
@@ -47,9 +286,13 @@ const composer = $('#composer');
 const composerCollapsed = $('#composer-collapsed');
 const composerNewList = $('#composer-newlist');
 const composerNewNumList = $('#composer-newnumlist');
+const composerImageCollapsed = $('#composer-image-collapsed');
 const composerTitle = $('#composer-title');
 const editor = $('#editor');
 const composerChecklistEl = $('#composer-checklist');
+const composerImagesEl = $('#composer-images');
+const composerImageBtn = $('#composer-image-btn');
+const composerImageFile = $('#composer-image-file');
 const composerColorsEl = $('#composer-colors');
 const composerLabelBtn = $('#composer-label-btn');
 const composerListBtn = $('#composer-list-btn');
@@ -76,6 +319,9 @@ const ICONS = {
   moon: '<path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8z"/>',
   sun: '<circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>',
   logout: '<path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/>',
+  person: '<circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V13z"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5-4 4-2-2-4 4"/>',
   notes: '<path d="M5 4h14v14l-4 2H5z"/><path d="M15 20v-4h4"/>',
   archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11h14V8"/><path d="M10 12h4"/>',
   trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
@@ -134,11 +380,11 @@ function debounce(fn, ms) {
 function formatRelative(iso) {
   const d = new Date(iso);
   const secs = (Date.now() - d.getTime()) / 1000;
-  if (secs < 45) return 'just now';
-  if (secs < 3600) return Math.round(secs / 60) + 'm ago';
-  if (secs < 86400) return Math.round(secs / 3600) + 'h ago';
-  if (secs < 604800) return Math.round(secs / 86400) + 'd ago';
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  if (secs < 45) return t('just_now');
+  if (secs < 3600) return t('minutes_ago', { n: Math.round(secs / 60) });
+  if (secs < 86400) return t('hours_ago', { n: Math.round(secs / 3600) });
+  if (secs < 604800) return t('days_ago', { n: Math.round(secs / 86400) });
+  return d.toLocaleDateString(lang, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function autosize(ta) {
@@ -582,8 +828,8 @@ function openColorPopover(anchor, current, onPick) {
     sw.type = 'button';
     sw.className = 'swatch' + (c.name === '' ? ' is-default' : '') + ((current || '') === c.name ? ' is-selected' : '');
     if (c.name) sw.dataset.color = c.name;
-    sw.title = c.label;
-    sw.setAttribute('aria-label', c.label);
+    sw.title = t(c.label);
+    sw.setAttribute('aria-label', t(c.label));
     sw.addEventListener('click', (e) => {
       e.stopPropagation();
       closePopovers();
@@ -610,7 +856,7 @@ function openLabelPopover(anchor, current, onChange) {
 
   const head = document.createElement('div');
   head.className = 'label-pop-head';
-  head.textContent = 'Label note';
+  head.textContent = t('label_note');
   pop.appendChild(head);
 
   const listEl = document.createElement('div');
@@ -635,7 +881,7 @@ function openLabelPopover(anchor, current, onChange) {
     if (names.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'label-pop-empty';
-      empty.textContent = 'No labels yet';
+      empty.textContent = t('no_labels');
       listEl.appendChild(empty);
       return;
     }
@@ -667,13 +913,13 @@ function openLabelPopover(anchor, current, onChange) {
   form.className = 'label-pop-create';
   const input = document.createElement('input');
   input.type = 'text';
-  input.placeholder = 'Create label';
+  input.placeholder = t('create_label');
   input.maxLength = 50;
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'icon-btn';
-  addBtn.title = 'Create label';
-  addBtn.setAttribute('aria-label', 'Create label');
+  addBtn.title = t('create_label');
+  addBtn.setAttribute('aria-label', t('create_label'));
   addBtn.innerHTML = icon('plus', 18);
   const createLabel = () => {
     const name = input.value.trim();
@@ -763,8 +1009,8 @@ function buildChecklistRows(host, items, opts) {
       const rm = document.createElement('button');
       rm.type = 'button';
       rm.className = 'cl-remove';
-      rm.title = 'Delete item';
-      rm.setAttribute('aria-label', 'Delete item');
+      rm.title = t('delete_item');
+      rm.setAttribute('aria-label', t('delete_item'));
       rm.innerHTML = icon('close', 16);
       rm.addEventListener('click', (e) => { e.stopPropagation(); o.onRemove(displayIndex); });
       row.appendChild(rm);
@@ -782,7 +1028,9 @@ function buildChecklistRows(host, items, opts) {
     chev.innerHTML = icon('chevron', 18);
     const label = document.createElement('span');
     label.className = 'cl-completed-label';
-    label.textContent = `${checked.length} completed item${checked.length === 1 ? '' : 's'}`;
+    label.textContent = checked.length === 1
+      ? t('completed_one', { n: checked.length })
+      : t('completed_many', { n: checked.length });
     header.append(chev, label);
     if (o.onCollapse) {
       header.addEventListener('click', (e) => { e.stopPropagation(); o.onCollapse(); });
@@ -842,7 +1090,7 @@ function makeAddItemRow(onSubmit) {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'cl-add-input';
-  input.placeholder = 'List item';
+  input.placeholder = t('list_item');
   const submit = () => {
     const text = input.value.trim();
     if (!text) return;
@@ -902,6 +1150,101 @@ async function toggleChecklistCollapse(m) {
 }
 
 // ===================================================================
+// Images — picked from the device, downscaled in the browser to a JPEG data
+// URL (no upload endpoint needed), then stored on the memo as a data URL.
+// ===================================================================
+
+// Read one image File and resolve to a downscaled JPEG data URL.
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type)) { reject(new Error('not an image')); return; }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read failed'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('decode failed'));
+      img.onload = () => {
+        const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; // flatten any transparency for JPEG
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Resize a FileList to at most `room` data URLs, skipping anything unreadable.
+async function filesToDataURLs(fileList, room) {
+  const files = [...(fileList || [])].filter((f) => /^image\//.test(f.type));
+  const out = [];
+  for (const f of files) {
+    if (out.length >= room) break;
+    try { out.push(await readImageFile(f)); } catch (_) { /* skip unreadable file */ }
+  }
+  return out;
+}
+
+// Open a native picker for images and hand the resulting data URLs to onPicked.
+function pickImages(onPicked) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.multiple = true;
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.addEventListener('change', async () => {
+    const urls = await filesToDataURLs(input.files, MAX_IMAGES);
+    input.remove();
+    if (urls.length) onPicked(urls);
+  }, { once: true });
+  input.click();
+}
+
+// A single image thumbnail (with an optional hover × to remove it).
+function imageThumb(src, onRemove) {
+  const fig = document.createElement('div');
+  fig.className = 'note-image';
+  const img = document.createElement('img');
+  img.src = src;
+  img.alt = '';
+  img.loading = 'lazy';
+  img.addEventListener('load', relayoutSoon);
+  fig.appendChild(img);
+  if (onRemove) {
+    fig.appendChild(iconButton('close', t('image_remove'),
+      (e) => { e.stopPropagation(); onRemove(); }, 'note-image-remove'));
+  }
+  return fig;
+}
+
+// The edge-to-edge image grid shown at the top of a card or in the modal.
+// onRemove(index) is optional (omitted on read-only cards).
+function imagesGrid(images, onRemove) {
+  const wrap = document.createElement('div');
+  wrap.className = 'note-images' + (images.length === 1 ? ' single' : '');
+  images.forEach((src, i) => {
+    wrap.appendChild(imageThumb(src, onRemove ? () => onRemove(i) : null));
+  });
+  return wrap;
+}
+
+// Fill a composer/editor strip host with removable thumbnails.
+function fillImageStrip(host, images, onRemove) {
+  host.innerHTML = '';
+  host.hidden = images.length === 0;
+  images.forEach((src, i) => host.appendChild(imageThumb(src, () => onRemove(i))));
+}
+
+// ===================================================================
 // Note cards
 // ===================================================================
 
@@ -913,10 +1256,15 @@ function noteCard(m) {
 
   // Pin (active view only).
   if (state.view === 'active') {
-    const pin = iconButton(m.pinned ? 'pinFilled' : 'pin', m.pinned ? 'Unpin' : 'Pin',
+    const pin = iconButton(m.pinned ? 'pinFilled' : 'pin', m.pinned ? t('unpin') : t('pin'),
       (e) => { e.stopPropagation(); togglePin(m); }, 'note-pin');
     if (m.pinned) pin.classList.add('is-pinned');
     el.appendChild(pin);
+  }
+
+  // Images sit above the title, like Google Keep.
+  if (m.images && m.images.length) {
+    el.appendChild(imagesGrid(m.images));
   }
 
   if (m.title) {
@@ -986,36 +1334,41 @@ function buildActions(el, m) {
   actions.className = 'note-actions';
 
   if (state.view === 'trash') {
-    actions.appendChild(iconButton('restore', 'Restore',
+    actions.appendChild(iconButton('restore', t('restore'),
       (e) => { e.stopPropagation(); restoreFromTrash(m); }));
-    actions.appendChild(iconButton('trash', 'Delete forever',
+    actions.appendChild(iconButton('trash', t('delete_forever'),
       (e) => { e.stopPropagation(); deleteForever(m); }));
   } else {
     // color
-    actions.appendChild(iconButton('palette', 'Background color', (e) => {
+    actions.appendChild(iconButton('palette', t('bg_color'), (e) => {
       e.stopPropagation();
       openColorPopover(e.currentTarget, m.color, (color) => setColor(m, color));
     }));
     // add label
-    actions.appendChild(iconButton('label', 'Add label', (e) => {
+    actions.appendChild(iconButton('label', t('add_label'), (e) => {
       e.stopPropagation();
       openLabelPopover(e.currentTarget, m.labels || [], (next) => setLabels(m, next));
     }));
+    // add image
+    actions.appendChild(iconButton('image', t('image_add'), (e) => {
+      e.stopPropagation();
+      pickImages((urls) => addImagesToMemo(m, urls));
+    }));
 
     if (state.view === 'archived') {
-      actions.appendChild(iconButton('unarchive', 'Unarchive',
+      actions.appendChild(iconButton('unarchive', t('unarchive'),
         (e) => { e.stopPropagation(); setArchived(m, false); }));
     } else {
-      actions.appendChild(iconButton('archive', 'Archive',
+      actions.appendChild(iconButton('archive', t('archive'),
         (e) => { e.stopPropagation(); setArchived(m, true); }));
     }
 
     // ⋮ more
-    actions.appendChild(iconButton('more', 'More', (e) => {
+    actions.appendChild(iconButton('more', t('more'), (e) => {
       e.stopPropagation();
       openMenu(e.currentTarget, [
-        { label: 'Make a copy', icon: 'copy', onClick: () => duplicateMemo(m) },
-        { label: 'Delete', icon: 'trash', onClick: () => trashMemo(m) },
+        { label: t('make_copy'), icon: 'copy', onClick: () => duplicateMemo(m) },
+        { label: t('delete'), icon: 'trash', onClick: () => trashMemo(m) },
       ]);
     }));
   }
@@ -1058,6 +1411,10 @@ function relayoutAll() {
   grids.forEach((g) => distribute(g.container, g.cards));
 }
 
+// Images load asynchronously, so a card's height isn't known when it is first
+// laid out. Re-flow the masonry shortly after each image settles.
+const relayoutSoon = debounce(() => relayoutAll(), 60);
+
 function render() {
   const q = state.query.toLowerCase();
   // Preserve server order (pinned-first, then manual position, then newest).
@@ -1079,11 +1436,11 @@ function render() {
   if (state.view === 'trash' && state.all.length > 0) {
     const note = document.createElement('span');
     note.className = 'board-note';
-    note.textContent = 'Notes in Trash are deleted after they are emptied.';
+    note.textContent = t('trash_note');
     const empty = document.createElement('button');
     empty.type = 'button';
     empty.className = 'text-btn danger';
-    empty.textContent = 'Empty trash';
+    empty.textContent = t('empty_trash');
     empty.addEventListener('click', emptyTrash);
     boardActions.append(note, empty);
   }
@@ -1100,10 +1457,10 @@ function render() {
 }
 
 function emptyMessage() {
-  if (state.all.length > 0) return 'No matching notes.';
-  if (state.view === 'archived') return 'Your archive is empty.';
-  if (state.view === 'trash') return 'Trash is empty.';
-  return 'Notes you add appear here.';
+  if (state.all.length > 0) return t('empty_no_match');
+  if (state.view === 'archived') return t('empty_archive');
+  if (state.view === 'trash') return t('empty_trash_state');
+  return t('empty_notes');
 }
 
 function rebuildCard(m) {
@@ -1185,7 +1542,7 @@ async function restoreFromTrash(m) {
 }
 
 async function deleteForever(m) {
-  if (!confirm('Delete this note forever? This cannot be undone.')) return;
+  if (!confirm(t('confirm_delete_forever'))) return;
   try {
     await api('DELETE', '/memos/' + m.id);
     state.all = state.all.filter((x) => x.id !== m.id);
@@ -1207,7 +1564,7 @@ async function duplicateMemo(m) {
 }
 
 async function emptyTrash() {
-  if (!confirm('Empty trash? All notes in trash will be permanently deleted.')) return;
+  if (!confirm(t('confirm_empty_trash'))) return;
   try {
     await api('POST', '/memos/trash/empty');
     state.all = [];
@@ -1224,6 +1581,30 @@ async function toggleTask(m, taskIndex) {
     patchMemo(upd);
     rebuildCard(upd);
   } catch (err) { alert(err.message); }
+}
+
+// ---- image mutations (persist + re-render card & modal) ----
+
+async function setMemoImages(m, images) {
+  try {
+    const upd = await api('PUT', '/memos/' + m.id, { images });
+    patchMemo(upd);
+    rebuildCard(upd);
+    if (modalMemo && modalMemo.id === upd.id) { modalMemo = upd; renderModalImages(upd); }
+  } catch (err) { alert(err.message); }
+}
+
+function addImagesToMemo(m, urls) {
+  const cur = liveMemo(m);
+  const existing = cur.images || [];
+  const next = [...existing, ...urls].slice(0, MAX_IMAGES);
+  if (next.length === existing.length) return; // already at the limit
+  setMemoImages(cur, next);
+}
+
+function removeImageFromMemo(m, index) {
+  const cur = liveMemo(m);
+  setMemoImages(cur, (cur.images || []).filter((_, i) => i !== index));
 }
 
 // ===================================================================
@@ -1259,7 +1640,7 @@ function openModal(m) {
   const title = document.createElement('input');
   title.className = 'modal-title';
   title.type = 'text';
-  title.placeholder = 'Title';
+  title.placeholder = t('composer_title');
   title.maxLength = 1024;
   title.value = m.title || '';
   modalTitleInput = title;
@@ -1270,6 +1651,11 @@ function openModal(m) {
       if (modalBodyTextarea) modalBodyTextarea.focus();
     }
   });
+
+  // Images host (full-width grid above the title).
+  const imagesHost = document.createElement('div');
+  imagesHost.className = 'modal-images';
+  imagesHost.dataset.host = 'images';
 
   // Body host (re-rendered in place by refreshModalBody).
   const bodyHost = document.createElement('div');
@@ -1284,12 +1670,13 @@ function openModal(m) {
   // Bottom action bar.
   const bar = buildModalActions(surface);
 
-  surface.append(title, bodyHost, chips, bar);
+  surface.append(imagesHost, title, bodyHost, chips, bar);
   backdrop.appendChild(surface);
   document.body.appendChild(backdrop);
   modalBackdrop = backdrop;
   document.body.classList.add('modal-open');
 
+  renderModalImages(m);
   fillModalBody(m);
   renderModalChips(m);
 
@@ -1322,7 +1709,7 @@ function fillModalBody(m) {
   } else {
     const ta = document.createElement('textarea');
     ta.className = 'modal-textarea';
-    ta.placeholder = 'Take a note…';
+    ta.placeholder = t('composer_take_note');
     ta.value = m.content;
     ta.addEventListener('input', () => autosize(ta));
     ta.addEventListener('keydown', (e) => {
@@ -1378,6 +1765,17 @@ function renderModalChips(m) {
   modalChips.hidden = !(m.labels && m.labels.length);
 }
 
+// Render the modal's image grid (with hover-remove) for the current memo.
+function renderModalImages(m) {
+  if (!modalSurface) return;
+  const host = modalSurface.querySelector('[data-host="images"]');
+  if (!host) return;
+  host.innerHTML = '';
+  if (m.images && m.images.length) {
+    host.appendChild(imagesGrid(m.images, (i) => removeImageFromMemo(m, i)));
+  }
+}
+
 // The modal's bottom action bar. Reuses the same per-view mutations as a card
 // (color / label / archive-or-unarchive / pin / ⋮ copy+delete) plus Close.
 function buildModalActions(surface) {
@@ -1387,7 +1785,7 @@ function buildModalActions(surface) {
   const liveRefresh = (upd) => { if (upd && modalMemo && upd.id === modalMemo.id) refreshModalBody(upd); };
 
   // color
-  bar.appendChild(iconButton('palette', 'Background color', (e) => {
+  bar.appendChild(iconButton('palette', t('bg_color'), (e) => {
     e.stopPropagation();
     openColorPopover(e.currentTarget, modalMemo.color, async (color) => {
       await setColor(modalMemo, color);
@@ -1396,7 +1794,7 @@ function buildModalActions(surface) {
     });
   }));
   // add label
-  bar.appendChild(iconButton('label', 'Add label', (e) => {
+  bar.appendChild(iconButton('label', t('add_label'), (e) => {
     e.stopPropagation();
     openLabelPopover(e.currentTarget, modalMemo.labels || [], async (next) => {
       await setLabels(modalMemo, next);
@@ -1404,21 +1802,26 @@ function buildModalActions(surface) {
       if (cur) liveRefresh(cur);
     });
   }));
+  // add image
+  bar.appendChild(iconButton('image', t('image_add'), (e) => {
+    e.stopPropagation();
+    pickImages((urls) => addImagesToMemo(modalMemo, urls));
+  }));
   // archive / unarchive (leaves the current view -> close the modal first)
   if (state.view === 'archived') {
-    bar.appendChild(iconButton('unarchive', 'Unarchive', async (e) => {
+    bar.appendChild(iconButton('unarchive', t('unarchive'), async (e) => {
       e.stopPropagation();
       const m = modalMemo; await closeModal(); setArchived(m, false);
     }));
   } else {
-    bar.appendChild(iconButton('archive', 'Archive', async (e) => {
+    bar.appendChild(iconButton('archive', t('archive'), async (e) => {
       e.stopPropagation();
       const m = modalMemo; await closeModal(); setArchived(m, true);
     }));
   }
   // pin / unpin (active view only, mirroring the card's floating pin)
   if (state.view === 'active') {
-    bar.appendChild(iconButton('pin', 'Pin', async (e) => {
+    bar.appendChild(iconButton('pin', t('pin'), async (e) => {
       e.stopPropagation();
       await togglePin(modalMemo);
       const cur = state.all.find((x) => x.id === modalMemo.id);
@@ -1427,11 +1830,11 @@ function buildModalActions(surface) {
     if (modalMemo.pinned) bar.lastChild.innerHTML = icon('pinFilled');
   }
   // ⋮ more
-  bar.appendChild(iconButton('more', 'More', (e) => {
+  bar.appendChild(iconButton('more', t('more'), (e) => {
     e.stopPropagation();
     openMenu(e.currentTarget, [
-      { label: 'Make a copy', icon: 'copy', onClick: async () => { const m = modalMemo; await closeModal(); duplicateMemo(m); } },
-      { label: 'Delete', icon: 'trash', onClick: async () => { const m = modalMemo; await closeModal(); trashMemo(m); } },
+      { label: t('make_copy'), icon: 'copy', onClick: async () => { const m = modalMemo; await closeModal(); duplicateMemo(m); } },
+      { label: t('delete'), icon: 'trash', onClick: async () => { const m = modalMemo; await closeModal(); trashMemo(m); } },
     ]);
   }));
 
@@ -1442,7 +1845,7 @@ function buildModalActions(surface) {
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'text-btn';
-  close.textContent = 'Close';
+  close.textContent = t('close');
   close.addEventListener('click', (e) => { e.stopPropagation(); closeModal(); });
   bar.appendChild(close);
 
@@ -1614,9 +2017,9 @@ async function moveCard(id, afterId) {
 // ===================================================================
 
 const VIEWS = [
-  { id: 'active', label: 'Notes', icon: 'notes', stat: 'notes' },
-  { id: 'archived', label: 'Archive', icon: 'archive', stat: 'archived' },
-  { id: 'trash', label: 'Trash', icon: 'trash', stat: 'trashed' },
+  { id: 'active', label: 'view_notes', icon: 'notes', stat: 'notes' },
+  { id: 'archived', label: 'view_archive', icon: 'archive', stat: 'archived' },
+  { id: 'trash', label: 'view_trash', icon: 'trash', stat: 'trashed' },
 ];
 
 function renderNav() {
@@ -1626,8 +2029,9 @@ function renderNav() {
     b.type = 'button';
     b.className = 'nav-item' + (state.view === v.id && state.label === '' ? ' active' : '');
     b.dataset.view = v.id;
+    b.title = t(v.label); // visible as a tooltip when the sidebar is a rail
     const count = stats[v.stat] || 0;
-    b.innerHTML = `<span class="nav-ico">${icon(v.icon)}</span><span class="nav-text">${v.label}</span>` +
+    b.innerHTML = `<span class="nav-ico">${icon(v.icon)}</span><span class="nav-text">${t(v.label)}</span>` +
       (count ? `<span class="nav-count">${count}</span>` : '');
     b.addEventListener('click', () => switchView(v.id));
     navList.appendChild(b);
@@ -1637,7 +2041,7 @@ function renderNav() {
 function renderLabels() {
   labelList.innerHTML = '';
   if (labels.length === 0) {
-    labelList.innerHTML = '<div class="nav-empty">No labels yet</div>';
+    labelList.innerHTML = `<div class="nav-empty">${escapeHtml(t('no_labels'))}</div>`;
     return;
   }
   labels.forEach((l) => {
@@ -1645,6 +2049,7 @@ function renderLabels() {
     b.type = 'button';
     b.className = 'nav-item' + (state.label.toLowerCase() === l.name.toLowerCase() ? ' active' : '');
     b.dataset.label = l.name;
+    b.title = l.name; // visible as a tooltip when the sidebar is a rail
     b.innerHTML = `<span class="nav-ico">${icon('label')}</span>` +
       `<span class="nav-text">${escapeHtml(l.name)}</span><span class="nav-count">${l.count}</span>`;
     b.addEventListener('click', () => filterByLabel(l.name));
@@ -1714,6 +2119,7 @@ function expandComposer(asChecklist) {
     composer.classList.remove('collapsed');
     renderComposerColors();
     renderComposerChips();
+    renderComposerImages();
   }
   setComposerChecklist(!!asChecklist);
   if (composerChecklist) {
@@ -1745,8 +2151,8 @@ function renderComposerColors() {
     sw.type = 'button';
     sw.className = 'swatch' + (c.name === '' ? ' is-default' : '') + (composerColor === c.name ? ' is-selected' : '');
     if (c.name) sw.dataset.color = c.name;
-    sw.title = c.label;
-    sw.setAttribute('aria-label', c.label);
+    sw.title = t(c.label);
+    sw.setAttribute('aria-label', t(c.label));
     sw.addEventListener('click', (e) => {
       // Stop the click-away handler from collapsing the composer when this
       // element is detached by the innerHTML reset below.
@@ -1780,6 +2186,26 @@ function renderComposerChips() {
     chip.appendChild(x);
     composerChips.appendChild(chip);
   });
+}
+
+// Render the composer's image strip (removable thumbnails) from composerImages.
+function renderComposerImages() {
+  fillImageStrip(composerImagesEl, composerImages, (i) => {
+    composerImages.splice(i, 1);
+    renderComposerImages();
+  });
+}
+
+// Downscale picked files and append them to the draft (respecting MAX_IMAGES),
+// expanding the composer if it was still collapsed.
+async function onComposerImageFiles(fileList) {
+  const room = MAX_IMAGES - composerImages.length;
+  if (room <= 0) return;
+  const urls = await filesToDataURLs(fileList, room);
+  if (!urls.length) return;
+  composerImages = composerImages.concat(urls).slice(0, MAX_IMAGES);
+  if (composer.classList.contains('collapsed')) expandComposer(false);
+  renderComposerImages();
 }
 
 // Render the composer's interactive checklist editor (items + add-row) from the
@@ -1858,11 +2284,12 @@ async function commitComposer() {
   // Snapshot scratch state, then reset the composer UI immediately.
   const color = composerColor;
   const labelsToSend = composerLabels.slice();
+  const imagesToSend = composerImages.slice();
   resetComposer();
 
-  if (content || title) {
+  if (content || title || imagesToSend.length) {
     try {
-      const m = await api('POST', '/memos', { title, content, color, labels: labelsToSend, checklist });
+      const m = await api('POST', '/memos', { title, content, color, labels: labelsToSend, checklist, images: imagesToSend });
       // A new note belongs to the active view; only show it if we're there.
       if (state.view === 'active') {
         state.all.unshift(m);
@@ -1878,7 +2305,7 @@ function resetComposer() {
   composer.classList.remove('is-checklist');
   composerPreviewBox.hidden = true;
   editor.hidden = false;
-  composerPreviewBtn.textContent = 'Preview';
+  composerPreviewBtn.textContent = t('preview');
   editor.value = '';
   composerTitle.value = '';
   autosize(editor);
@@ -1886,44 +2313,289 @@ function resetComposer() {
   composerLabels = [];
   composerChecklist = false;
   composerItems = [];
+  composerImages = [];
   composerChecklistEl.hidden = true;
   composerChecklistEl.innerHTML = '';
+  composerImagesEl.hidden = true;
+  composerImagesEl.innerHTML = '';
   delete composer.dataset.color;
   composerChips.hidden = true;
   composerChips.innerHTML = '';
 }
 
 // ===================================================================
-// Theme + sidebar
+// Theme, language + sidebar
 // ===================================================================
 
-// The theme actually in effect: an explicit override if set, else the OS pref.
-function effectiveTheme() {
-  return document.documentElement.dataset.theme
-    || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+// The stored color-scheme choice: 'system' (default), 'light' or 'dark'.
+function currentTheme() {
+  try {
+    const v = localStorage.getItem('notavex-theme');
+    if (v === 'light' || v === 'dark') return v;
+  } catch (e) { /* ignore */ }
+  return 'system';
 }
 
-// The toggle shows where a click will take you: a sun (→ light) while in dark
-// mode, a moon (→ dark) while in light mode.
-function updateThemeIcon() {
-  const dark = effectiveTheme() === 'dark';
-  themeToggle.innerHTML = icon(dark ? 'sun' : 'moon', 20);
-  themeToggle.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
+function applyTheme(choice) {
+  if (choice === 'light' || choice === 'dark') document.documentElement.dataset.theme = choice;
+  else delete document.documentElement.dataset.theme; // 'system' -> follow the OS
 }
 
-function applyTheme(theme) {
-  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
-  else delete document.documentElement.dataset.theme;
-  updateThemeIcon();
-}
-
-function toggleTheme() {
-  const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('notavex-theme', next);
-  applyTheme(next);
+// Persist and apply a color-scheme choice (System/Light/Dark from Settings).
+function setTheme(choice) {
+  try {
+    if (choice === 'light' || choice === 'dark') localStorage.setItem('notavex-theme', choice);
+    else localStorage.removeItem('notavex-theme');
+  } catch (e) { /* ignore */ }
+  applyTheme(choice);
 }
 
 function closeSidebar() { document.body.classList.remove('sidebar-open'); }
+
+function isNarrow() { return matchMedia('(max-width: 720px)').matches; }
+
+// Desktop rail-collapse state lives in body.sidebar-collapsed and is persisted.
+// On mobile the hamburger opens the drawer instead, so the rail never applies.
+function applyRail(collapsed) { document.body.classList.toggle('sidebar-collapsed', collapsed); }
+
+function loadRail() {
+  let collapsed = false;
+  try { collapsed = localStorage.getItem('notavex-rail') === '1'; } catch (e) { /* ignore */ }
+  applyRail(collapsed && !isNarrow());
+}
+
+// The hamburger: collapse/expand the rail on desktop, open/close the drawer on
+// mobile.
+function toggleSidebar() {
+  if (isNarrow()) {
+    document.body.classList.toggle('sidebar-open');
+    return;
+  }
+  const collapsed = !document.body.classList.contains('sidebar-collapsed');
+  applyRail(collapsed);
+  try { localStorage.setItem('notavex-rail', collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+}
+
+// ===================================================================
+// Account menu + dialogs (account / settings)
+// ===================================================================
+
+function closeAccountMenu() {
+  accountMenu.hidden = true;
+  accountBtn.setAttribute('aria-expanded', 'false');
+}
+function openAccountMenu() {
+  accountMenu.hidden = false;
+  accountBtn.setAttribute('aria-expanded', 'true');
+}
+
+function initAccountMenu() {
+  accountBtn.innerHTML = icon('person', 20);
+  accountProfileBtn.querySelector('.account-ico').innerHTML = icon('person', 18);
+  accountSettingsBtn.querySelector('.account-ico').innerHTML = icon('gear', 18);
+  accountLogoutBtn.querySelector('.account-ico').innerHTML = icon('logout', 18);
+
+  accountBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (accountMenu.hidden) openAccountMenu(); else closeAccountMenu();
+  });
+  accountProfileBtn.addEventListener('click', () => { closeAccountMenu(); openAccountDialog(); });
+  accountSettingsBtn.addEventListener('click', () => { closeAccountMenu(); openSettingsDialog(); });
+  accountLogoutBtn.addEventListener('click', async () => {
+    closeAccountMenu();
+    try { await api('POST', '/logout'); } catch (err) { /* ignore */ }
+    window.location.href = '/login';
+  });
+
+  document.addEventListener('click', (e) => { if (!accountWrap.contains(e.target)) closeAccountMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAccountMenu(); });
+}
+
+// Build a modal dialog shell with a header (title + ✕) and an empty body.
+// Returns { body, close }; close() tears the dialog down.
+function buildDialog(titleText) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'dialog-backdrop';
+  const dialog = document.createElement('div');
+  dialog.className = 'dialog';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+
+  const head = document.createElement('div');
+  head.className = 'dialog-head';
+  const h = document.createElement('h2');
+  h.textContent = titleText;
+  head.append(h, iconButton('close', t('close'), () => close()));
+
+  const body = document.createElement('div');
+  body.className = 'dialog-body';
+  dialog.append(head, body);
+  backdrop.appendChild(dialog);
+
+  function close() {
+    backdrop.remove();
+    document.body.classList.remove('modal-open');
+    document.removeEventListener('keydown', onKey, true);
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+  }
+  backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) backdrop._down = true; });
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop && backdrop._down) close();
+    backdrop._down = false;
+  });
+  document.addEventListener('keydown', onKey, true);
+
+  document.body.appendChild(backdrop);
+  document.body.classList.add('modal-open');
+  return { body, close };
+}
+
+function settingRow(labelText, control) {
+  const row = document.createElement('div');
+  row.className = 'setting-row';
+  const lab = document.createElement('span');
+  lab.className = 'setting-label';
+  lab.textContent = labelText;
+  row.append(lab, control);
+  return row;
+}
+
+// A segmented switch. options = [[value, label], …]; onPick(value) on change.
+function segmented(options, current, onPick) {
+  const wrap = document.createElement('div');
+  wrap.className = 'seg';
+  options.forEach(([value, label]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'seg-btn' + (value === current ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      wrap.querySelectorAll('.seg-btn').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      onPick(value);
+    });
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+
+// Settings: color scheme (System/Light/Dark) + language (EN/DE), both persisted.
+function openSettingsDialog() {
+  const { body } = buildDialog(t('settings_title'));
+
+  const section = document.createElement('div');
+  section.className = 'dialog-section';
+  const stitle = document.createElement('div');
+  stitle.className = 'dialog-section-title';
+  stitle.textContent = t('appearance');
+  section.appendChild(stitle);
+
+  section.appendChild(settingRow(t('color_theme'), segmented(
+    [['system', t('theme_system')], ['light', t('theme_light')], ['dark', t('theme_dark')]],
+    currentTheme(),
+    setTheme,
+  )));
+  section.appendChild(settingRow(t('language'), segmented(
+    [['en', 'EN'], ['de', 'DE']],
+    lang,
+    setLang, // persists + reloads
+  )));
+
+  body.appendChild(section);
+}
+
+function passwordField(labelText, autocomplete) {
+  const field = document.createElement('div');
+  field.className = 'field';
+  const id = 'pf-' + Math.random().toString(36).slice(2, 8);
+  const label = document.createElement('label');
+  label.setAttribute('for', id);
+  label.textContent = labelText;
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.id = id;
+  input.autocomplete = autocomplete;
+  field.append(label, input);
+  return { field, input };
+}
+
+// Account: change the single-user password (current → new → confirm).
+function openAccountDialog() {
+  const { body, close } = buildDialog(t('account_title'));
+
+  const stitle = document.createElement('div');
+  stitle.className = 'dialog-section-title';
+  stitle.textContent = t('change_password');
+  body.appendChild(stitle);
+
+  const msg = document.createElement('p');
+  msg.className = 'dialog-msg';
+  msg.hidden = true;
+  body.appendChild(msg);
+  const showMsg = (text, ok) => {
+    msg.textContent = text;
+    msg.className = 'dialog-msg ' + (ok ? 'ok' : 'err');
+    msg.hidden = false;
+  };
+
+  const form = document.createElement('form');
+  form.autocomplete = 'off';
+  const cur = passwordField(t('current_password'), 'current-password');
+  const nw = passwordField(t('new_password'), 'new-password');
+  const cf = passwordField(t('confirm_password'), 'new-password');
+  form.append(cur.field, nw.field, cf.field);
+
+  const actions = document.createElement('div');
+  actions.className = 'dialog-actions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'text-btn';
+  cancel.textContent = t('cancel');
+  cancel.addEventListener('click', () => close());
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'btn-primary';
+  save.textContent = t('save');
+  actions.append(cancel, save);
+  form.appendChild(actions);
+  body.appendChild(form);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const currentPassword = cur.input.value;
+    const newPassword = nw.input.value;
+    const confirm = cf.input.value;
+    if (!currentPassword || !newPassword || !confirm) { showMsg(t('pw_required'), false); return; }
+    if (newPassword !== confirm) { showMsg(t('pw_mismatch'), false); return; }
+    if (newPassword.length < 4) { showMsg(t('pw_too_short'), false); return; }
+    save.disabled = true;
+    try {
+      // Direct fetch (not api()) so a 401 = wrong current password, not a redirect.
+      const res = await fetch('/api/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      if (res.ok) {
+        showMsg(t('pw_changed'), true);
+        cur.input.value = nw.input.value = cf.input.value = '';
+        setTimeout(close, 1200);
+        return;
+      }
+      if (res.status === 401) showMsg(t('pw_wrong_current'), false);
+      else if (res.status === 400) showMsg(t('pw_too_short'), false);
+      else showMsg(t('pw_error'), false);
+    } catch (err) {
+      showMsg(t('pw_error'), false);
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  cur.input.focus();
+}
 
 // ===================================================================
 // Init
@@ -1931,27 +2603,25 @@ function closeSidebar() { document.body.classList.remove('sidebar-open'); }
 
 function paintStaticIcons() {
   navToggle.innerHTML = icon('menu', 22);
-  updateThemeIcon();
-  logoutBtn.innerHTML = icon('logout', 20);
   $('#brand-logo').innerHTML = icon('logo', 24);
   composerNewList.innerHTML = icon('checklist', 20);
   composerNewNumList.innerHTML = icon('listNumbered', 20);
+  composerImageCollapsed.innerHTML = icon('image', 20);
   composerLabelBtn.innerHTML = icon('label', 18);
   composerListBtn.innerHTML = icon('checklist', 18);
+  composerImageBtn.innerHTML = icon('image', 18);
 }
 
 async function init() {
-  applyTheme(localStorage.getItem('notavex-theme'));
+  applyI18n();
+  applyTheme(currentTheme());
+  loadRail();
   paintStaticIcons();
-  themeToggle.addEventListener('click', toggleTheme);
-  // Keep the icon honest when following the OS and it flips light/dark.
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    if (!document.documentElement.dataset.theme) updateThemeIcon();
-  });
+  initAccountMenu();
 
   navToggle.addEventListener('click', (e) => {
     e.stopPropagation();
-    document.body.classList.toggle('sidebar-open');
+    toggleSidebar();
   });
   scrim.addEventListener('click', closeSidebar);
 
@@ -1960,6 +2630,12 @@ async function init() {
   composerCollapsed.addEventListener('focus', () => expandComposer(false));
   composerNewList.addEventListener('click', (e) => { e.stopPropagation(); expandComposer(true); });
   composerNewNumList.addEventListener('click', (e) => { e.stopPropagation(); startNumberedList(); });
+  composerImageBtn.addEventListener('click', (e) => { e.stopPropagation(); composerImageFile.click(); });
+  composerImageCollapsed.addEventListener('click', (e) => { e.stopPropagation(); expandComposer(false); composerImageFile.click(); });
+  composerImageFile.addEventListener('change', async () => {
+    await onComposerImageFiles(composerImageFile.files);
+    composerImageFile.value = ''; // allow re-picking the same file
+  });
   composerCloseBtn.addEventListener('click', commitComposer);
   composer.addEventListener('submit', (e) => { e.preventDefault(); commitComposer(); });
   editor.addEventListener('input', () => autosize(editor));
@@ -1997,10 +2673,10 @@ async function init() {
     // Hide whichever editor body is active while previewing.
     if (composerChecklist) composerChecklistEl.hidden = show;
     else editor.hidden = show;
-    composerPreviewBtn.textContent = show ? 'Edit' : 'Preview';
+    composerPreviewBtn.textContent = show ? t('edit') : t('preview');
     if (show) {
       const { content } = composerPayload();
-      composerPreviewBox.innerHTML = renderMarkdown(content) || '<p class="muted">Nothing to preview.</p>';
+      composerPreviewBox.innerHTML = renderMarkdown(content) || `<p class="muted">${escapeHtml(t('nothing_preview'))}</p>`;
     }
   });
 
@@ -2011,11 +2687,6 @@ async function init() {
     renderLabels();
     render();
   }, 200));
-
-  logoutBtn.addEventListener('click', async () => {
-    try { await api('POST', '/logout'); } catch (err) { /* ignore */ }
-    window.location.href = '/login';
-  });
 
   // Click-away: commit the composer, close popovers, close the mobile drawer.
   // Clicks on detached nodes or inside a popover are ignored (see the color bug
@@ -2033,14 +2704,16 @@ async function init() {
     if (e.key === 'Escape') closePopovers();
   });
 
-  window.addEventListener('resize', debounce(() => { closePopovers(); relayoutAll(); }, 150));
+  window.addEventListener('resize', debounce(() => { closePopovers(); relayoutAll(); loadRail(); }, 150));
   // Popovers are anchored in page coordinates; drop them on scroll to avoid drift.
   window.addEventListener('scroll', () => closePopovers(), { passive: true });
 
   try {
     const cfg = await api('GET', '/config');
     state.authEnabled = cfg.authEnabled;
-    logoutBtn.hidden = !cfg.authEnabled;
+    // The account (password) and log-out items only make sense with a login.
+    accountProfileBtn.hidden = !cfg.authEnabled;
+    accountLogoutBtn.hidden = !cfg.authEnabled;
   } catch (err) { /* ignore */ }
 
   renderNav();

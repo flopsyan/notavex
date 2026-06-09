@@ -14,7 +14,11 @@ services:
       # Set to "true" if a reverse proxy terminates HTTPS in front of Notavex:
       # NOTAVEX_SECURE: "true"
     volumes:
+      # Default: a named Docker volume.
       - notavex-data:/data
+      # To keep the data on a NAS instead, comment the line above and bind-mount
+      # a path from the NAS (adjust to your NAS, e.g. Synology /volume1/...):
+      # - /volume1/docker/notavex:/data
 
 volumes:
   notavex-data:

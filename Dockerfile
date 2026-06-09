@@ -5,7 +5,7 @@
 # builder too (buildx is not required). To produce a multi-arch image, build
 # with buildx, which runs this stage per target platform:
 #   docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 .
-FROM golang:1.22-alpine AS build
+FROM golang:1.24-alpine AS build
 WORKDIR /src
 
 # No external modules, so this is effectively a no-op — but it keeps the layer

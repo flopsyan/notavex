@@ -7,10 +7,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"embed"
-	"encoding/hex"
 	"errors"
 	"io/fs"
 	"log"
@@ -87,43 +84,4 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
-}
-
-func newAuth(password string, secure bool, dataDir string) (*Auth, error) {
-	a := &Auth{
-		enabled:  password != "",
-		password: password,
-		secure:   secure,
-	}
-	// A fixed secret from the environment lets sessions survive restarts and
-	// work across multiple instances; otherwise we persist a random one.
-	if env := os.Getenv("NOTAVEX_SECRET"); env != "" {
-		sum := sha256.Sum256([]byte(env))
-		a.secret = sum[:]
-		return a, nil
-	}
-	secret, err := loadOrCreateSecret(filepath.Join(dataDir, ".secret"))
-	if err != nil {
-		return nil, err
-	}
-	a.secret = secret
-	return a, nil
-}
-
-// loadOrCreateSecret reads a hex-encoded signing secret from path, creating a
-// new random one (0600) if it does not yet exist or is invalid.
-func loadOrCreateSecret(path string) ([]byte, error) {
-	if data, err := os.ReadFile(path); err == nil {
-		if b, err := hex.DecodeString(strings.TrimSpace(string(data))); err == nil && len(b) >= 16 {
-			return b, nil
-		}
-	}
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(path, []byte(hex.EncodeToString(secret)), 0o600); err != nil {
-		return nil, err
-	}
-	return secret, nil
 }

@@ -17,10 +17,18 @@ to hack on.
   **trash**, and "make a copy".
 - **Smart checklists** — turn any note into a to-do list; ticked items sink to the
   bottom under a collapsible, remembered "completed" section.
+- **Images** — attach pictures from the composer, a card's action row or the editor;
+  they are downscaled in the browser and stored inline (no uploads folder to manage).
+- **Login & settings** — an optional password **login** with an in-app **password
+  change** (under **Account**), plus a settings menu for the **color theme**
+  (System / Light / Dark) and **language** (English / German). Theme and language
+  default to your system and are remembered per browser.
+- **Collapsible sidebar** — a Google Keep-style hamburger collapses the sidebar to an
+  icon rail; hover to peek the full labels.
 - **Tiny footprint** — the Docker image is a few MB and runs happily on a
   Raspberry Pi (`amd64` / `arm64` / `armv7`).
 - **Keep-style UI** — a responsive masonry grid of cards, an expanding composer, a
-  full-screen note editor, monochrome icons, dark mode, and `Ctrl/⌘ + Enter` to save.
+  full-screen note editor, monochrome icons, light & dark mode, and `Ctrl/⌘ + Enter` to save.
 
 ## Quick start
 
@@ -51,7 +59,7 @@ docker run -d --name notavex -p 8080:8080 -v notavex-data:/data \
 
 ### From source
 
-Requires Go 1.22+.
+Requires Go 1.24+ (for the standard-library `crypto/pbkdf2` password hashing).
 
 ```bash
 go run .                          # serves http://localhost:8080, data in ./data
@@ -66,8 +74,8 @@ Everything is configured through environment variables:
 | Variable           | Default    | Description |
 |--------------------|------------|-------------|
 | `NOTAVEX_ADDR`     | `:8080`    | Address/port to listen on. |
-| `NOTAVEX_DATA_DIR` | `data`     | Directory for the notes file and session secret. |
-| `NOTAVEX_PASSWORD` | *(unset)*  | If set, a login with this password is required. If unset, Notavex runs **without authentication**. |
+| `NOTAVEX_DATA_DIR` | `data`     | Directory for the notes file, password hash and session secret. |
+| `NOTAVEX_PASSWORD` | *(unset)*  | **Bootstraps** the login password on first run. After that it is stored hashed in the data dir (and can be changed under **Account**), so this variable is then ignored. Unset **and** no stored password → Notavex runs **without authentication**. |
 | `NOTAVEX_SECURE`   | `false`    | Set to `true` when serving over HTTPS so the session cookie is marked `Secure`. |
 | `NOTAVEX_SECRET`   | *(auto)*   | Session signing secret. If unset, a random one is generated and stored in the data dir. |
 
@@ -75,10 +83,45 @@ Everything is configured through environment variables:
 
 Everything lives in `NOTAVEX_DATA_DIR`:
 
-- `notavex.json` — all your notes, as human-readable JSON, written atomically.
+- `notavex.json` — all your notes (incl. attached images as inline data), as
+  human-readable JSON, written atomically.
+- `auth.json` — the **salted PBKDF2 hash** of your login password (only present
+  once a password has been set; never the password itself).
 - `.secret` — the session signing key.
 
-To back up, copy `notavex.json` somewhere safe. To restore, put it back and restart.
+To back up, copy the data directory somewhere safe. To restore, put it back and
+restart. To **reset a forgotten password**, delete `auth.json` and set
+`NOTAVEX_PASSWORD` again (it re-bootstraps on the next start).
+
+### Storing the data on a NAS
+
+The data directory is just a folder, so point it at your NAS exactly like you
+would for any other self-hosted app — **bind-mount** a path from the NAS into the
+container instead of using a named Docker volume:
+
+```yaml
+services:
+  notavex:
+    # …
+    volumes:
+      # host path on the NAS  ->  container data dir
+      - /volume1/docker/notavex:/data
+```
+
+(`/volume1/...` is the typical Synology layout; use `/mnt/...`, `/share/...`, etc.
+for your NAS.) Or with `docker run`:
+
+```bash
+docker run -d --name notavex -p 8080:8080 \
+  -v /volume1/docker/notavex:/data \
+  -e NOTAVEX_PASSWORD=your-strong-password notavex
+```
+
+Make sure the mounted folder is writable by the container user, and prefer a
+local/iSCSI volume over a flaky SMB/NFS share — the store rewrites a single file
+atomically (write-temp-then-rename), which needs a filesystem that supports
+`rename`. That is the same approach as the sibling *epulonis* project, which
+bind-mounts its `/app/data` (SQLite) folder the same way.
 
 ## Security
 
@@ -88,6 +131,10 @@ the internet:
 1. Set `NOTAVEX_PASSWORD` to a strong value.
 2. Put it behind HTTPS (a reverse proxy such as Caddy, Traefik or Nginx) and set
    `NOTAVEX_SECURE=true`.
+
+The password is kept only as a salted PBKDF2 hash and can be changed in the app
+under **Account**. Changing it invalidates all existing sessions (every logged-in
+browser is signed out), because session tokens are bound to the password hash.
 
 For a home-only setup (LAN, VPN, Tailscale) you can leave it open.
 
@@ -124,9 +171,11 @@ Project layout:
 
 ```
 main.go         entry point, configuration, graceful shutdown
+auth.go         password hashing (PBKDF2) and signed session tokens
 store.go        the JSON-backed, thread-safe note store
-server.go       HTTP routing, JSON API and session auth
+server.go       HTTP routing and the JSON API
 store_test.go   store unit tests
+auth_test.go    auth / session unit tests
 web/            embedded single-page UI (HTML/CSS/JS, no build step)
 ```
 
@@ -135,15 +184,18 @@ The web assets are embedded into the binary with `//go:embed`, so the compiled
 
 ## API
 
-All endpoints return JSON. When `NOTAVEX_PASSWORD` is set they require the session
+All endpoints return JSON. When a login password is set they require the session
 cookie obtained from `POST /api/login`.
 
 | Method   | Path                        | Description                          |
 |----------|-----------------------------|--------------------------------------|
+| `POST`   | `/api/login`                | Start a session (`{password}`).      |
+| `POST`   | `/api/logout`               | End the session.                     |
+| `POST`   | `/api/password`             | Change the password (`{currentPassword, newPassword}`); re-issues the session. |
 | `GET`    | `/api/memos`                | List notes (`?view=active`/`archived`/`trash`, `?q=`, `?label=`, `?limit=`, `?offset=`). |
-| `POST`   | `/api/memos`                | Create a note (`{title?, content?, color?, labels?, checklist?}`; needs a title or content). |
+| `POST`   | `/api/memos`                | Create a note (`{title?, content?, color?, labels?, checklist?, images?}`; needs a title, content or image). |
 | `GET`    | `/api/memos/{id}`           | Fetch one note.                      |
-| `PUT`    | `/api/memos/{id}`           | Update fields (`{title?, content?, labels?, checklist?}`). |
+| `PUT`    | `/api/memos/{id}`           | Update fields (`{title?, content?, labels?, checklist?, images?}`). |
 | `DELETE` | `/api/memos/{id}`           | Permanently delete a note.           |
 | `POST`   | `/api/memos/{id}/pin`       | Pin/unpin (`{pinned}`).              |
 | `POST`   | `/api/memos/{id}/color`     | Set color (`{color}`; `""` = default). |

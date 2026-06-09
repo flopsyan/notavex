@@ -22,6 +22,7 @@ type Memo struct {
 	Title              string     `json:"title"`
 	Content            string     `json:"content"`
 	Labels             []string   `json:"labels"`
+	Images             []string   `json:"images,omitempty"`
 	Pinned             bool       `json:"pinned"`
 	Color              string     `json:"color"`
 	Archived           bool       `json:"archived"`
@@ -186,10 +187,32 @@ func normalizeLabels(in []string) []string {
 	return out
 }
 
+// normalizeImages returns a clean copy of an image list: trimmed, with empty
+// entries dropped. Format and size are validated at the HTTP layer. Returns nil
+// when nothing remains.
+func normalizeImages(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func cloneMemo(m *Memo) *Memo {
 	c := *m
 	if m.Labels != nil {
 		c.Labels = slices.Clone(m.Labels)
+	}
+	if m.Images != nil {
+		c.Images = slices.Clone(m.Images)
 	}
 	if m.TrashedAt != nil {
 		t := *m.TrashedAt
@@ -217,14 +240,16 @@ type NewMemo struct {
 	Color     string
 	Labels    []string
 	Checklist bool
+	Images    []string
 }
 
 // Create stores a new memo and returns it.
 func (s *Store) Create(in NewMemo) (*Memo, error) {
 	title := strings.TrimSpace(in.Title)
 	content := strings.TrimSpace(in.Content)
-	if title == "" && content == "" {
-		return nil, errors.New("title or content required")
+	images := normalizeImages(in.Images)
+	if title == "" && content == "" && len(images) == 0 {
+		return nil, errors.New("title, content or image required")
 	}
 
 	s.mu.Lock()
@@ -236,6 +261,7 @@ func (s *Store) Create(in NewMemo) (*Memo, error) {
 		Title:     title,
 		Content:   content,
 		Labels:    normalizeLabels(in.Labels),
+		Images:    images,
 		Color:     in.Color,
 		Checklist: in.Checklist,
 		Position:  s.maxPosition() + 1,
@@ -260,6 +286,7 @@ type UpdateMemo struct {
 	Content   *string
 	Labels    *[]string
 	Checklist *bool
+	Images    *[]string
 }
 
 // Update applies the supplied non-nil fields to an existing memo and bumps
@@ -275,7 +302,14 @@ func (s *Store) Update(id int64, in UpdateMemo) (*Memo, error) {
 
 	prevTitle, prevContent := m.Title, m.Content
 	prevLabels, prevChecklist := m.Labels, m.Checklist
+	prevImages := m.Images
 	prevUpdated := m.UpdatedAt
+
+	restore := func() {
+		m.Title, m.Content = prevTitle, prevContent
+		m.Labels, m.Checklist = prevLabels, prevChecklist
+		m.Images = prevImages
+	}
 
 	if in.Title != nil {
 		m.Title = strings.TrimSpace(*in.Title)
@@ -289,18 +323,19 @@ func (s *Store) Update(id int64, in UpdateMemo) (*Memo, error) {
 	if in.Checklist != nil {
 		m.Checklist = *in.Checklist
 	}
+	if in.Images != nil {
+		m.Images = normalizeImages(*in.Images)
+	}
 
-	if m.Title == "" && m.Content == "" {
-		m.Title, m.Content = prevTitle, prevContent
-		m.Labels, m.Checklist = prevLabels, prevChecklist
-		return nil, errors.New("title or content required")
+	if m.Title == "" && m.Content == "" && len(m.Images) == 0 {
+		restore()
+		return nil, errors.New("title, content or image required")
 	}
 
 	m.UpdatedAt = time.Now().UTC()
 
 	if err := s.save(); err != nil {
-		m.Title, m.Content = prevTitle, prevContent
-		m.Labels, m.Checklist = prevLabels, prevChecklist
+		restore()
 		m.UpdatedAt = prevUpdated
 		return nil, err
 	}
@@ -487,6 +522,7 @@ func (s *Store) Duplicate(id int64) (*Memo, error) {
 		Title:              src.Title,
 		Content:            src.Content,
 		Labels:             slices.Clone(src.Labels),
+		Images:             slices.Clone(src.Images),
 		Color:              src.Color,
 		Checklist:          src.Checklist,
 		CompletedCollapsed: src.CompletedCollapsed,
