@@ -41,17 +41,25 @@ to hack on.
 ```bash
 git clone https://github.com/flopsyan/notavex.git
 cd notavex
-docker compose up -d
+
+# optional: configure (e.g. set a password to require a login)
+cp .env.example .env
+
+docker compose up -d --build
 ```
 
 Open <http://localhost:8080>. Notes are stored in the `notavex-data` Docker volume.
 
-To require a login, set a password in `docker-compose.yml`:
+To **require a login**, set a password in `.env` before starting (or edit it and
+re-run `docker compose up -d --build`):
 
-```yaml
-    environment:
-      NOTAVEX_PASSWORD: "your-strong-password"
+```bash
+NOTAVEX_PASSWORD=your-strong-password
 ```
+
+On the first start this bootstraps the admin account (user `NOTAVEX_USER`,
+default `admin`); afterwards manage users in the app under **Settings**. Re-run
+with `--build` to pick up new versions or changed assets.
 
 ### Docker (without Compose)
 
