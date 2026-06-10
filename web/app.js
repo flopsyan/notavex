@@ -1165,20 +1165,21 @@ function renderChecklist(m, { interactive } = {}, extra = {}) {
   });
 
   if (extra.showAdd) {
-    wrap.appendChild(makeAddItemRow((text) => {
-      // Remember to re-focus the (rebuilt) add input after the async persist,
-      // so the modal supports fast sequential item entry.
-      modalAddFocusPending = true;
+    wrap.appendChild(makeAddItemRow((text, keepFocus) => {
+      // On Enter, re-focus the (rebuilt) add input after the async persist so the
+      // modal supports fast sequential entry; on blur, leave focus where it went.
+      if (keepFocus) modalAddFocusPending = true;
       addChecklistItem(m, text);
     }));
   }
   return wrap;
 }
 
-// The "+ List item" row. `onSubmit(text)` is called on Enter / button click.
-// The input is cleared before onSubmit (callers typically re-render the list and
-// own re-focusing the fresh add input); if the same input is still connected
-// after onSubmit, keep focus on it for fast sequential entry.
+// The "+ List item" row. `onSubmit(text, keepFocus)` is called on Enter and on
+// blur (Google Keep style: typing then clicking away still commits the text).
+// The input is cleared before onSubmit. `keepFocus` is true for Enter so callers
+// re-focus the rebuilt add input for fast sequential entry, and false on blur so
+// committing does not yank focus back from wherever the user clicked.
 function makeAddItemRow(onSubmit) {
   const row = document.createElement('div');
   row.className = 'cl-add';
@@ -1190,17 +1191,19 @@ function makeAddItemRow(onSubmit) {
   input.className = 'cl-add-input';
   input.placeholder = t('list_item');
   input.title = t('list_item_hint'); // "## …" starts a subheading
-  const submit = () => {
+  const submit = (keepFocus) => {
     const text = input.value.trim();
     if (!text) return;
-    input.value = '';
-    onSubmit(text);
-    if (input.isConnected) input.focus(); // not re-rendered away -> keep focus
+    input.value = ''; // cleared first, so the removal-induced blur is a no-op
+    onSubmit(text, keepFocus);
+    if (keepFocus && input.isConnected) input.focus(); // not re-rendered -> keep focus
   };
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    if (e.key === 'Enter') { e.preventDefault(); submit(true); }
     e.stopPropagation();
   });
+  // Commit whatever was typed when the field loses focus (click away, Tab, etc.).
+  input.addEventListener('blur', () => submit(false));
   input.addEventListener('click', (e) => e.stopPropagation());
   row.append(plus, input);
   return row;
@@ -2326,15 +2329,18 @@ function renderComposerChecklist() {
       renderComposerChecklist();
     },
   });
-  composerChecklistEl.appendChild(makeAddItemRow((text) => {
+  composerChecklistEl.appendChild(makeAddItemRow((text, keepFocus) => {
     const entry = parseAddEntry(text);
     composerItems.push(entry.heading
       ? { heading: true, text: entry.text }
       : { checked: false, text: entry.text });
     renderComposerChecklist();
-    // Refocus the (re-rendered) add input for fast sequential entry.
-    const inp = composerChecklistEl.querySelector('.cl-add-input');
-    if (inp) inp.focus();
+    // Refocus the (re-rendered) add input for fast sequential entry on Enter;
+    // on blur, leave focus where the user clicked.
+    if (keepFocus) {
+      const inp = composerChecklistEl.querySelector('.cl-add-input');
+      if (inp) inp.focus();
+    }
   }));
 }
 
