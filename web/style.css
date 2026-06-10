@@ -431,6 +431,23 @@ a { color: inherit; }
 .cl-chevron:not(.is-open) { transform: rotate(-90deg); }
 .cl-completed-group { padding-top: 2px; }
 
+/* In-list subheadings: a flush-left section label with a divider above it, so
+   items (indented by their checkbox) read as grouped beneath it. */
+.cl-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+.cl-heading:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.cl-heading-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cl-heading:hover .cl-remove { opacity: 1; }
+
 .cl-add { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .cl-add-ico { display: inline-flex; align-items: center; color: var(--muted); flex: 0 0 auto; }
 .cl-add-input {

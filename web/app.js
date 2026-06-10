@@ -44,7 +44,9 @@ const STRINGS = {
     label_note: 'Label note',
     create_label: 'Create label',
     list_item: 'List item',
+    list_item_hint: 'Tip: start a line with ## to add a subheading',
     delete_item: 'Delete item',
+    delete_heading: 'Delete subheading',
     remove_label: 'Remove label',
     // card actions
     pin: 'Pin',
@@ -162,7 +164,9 @@ const STRINGS = {
     label_note: 'Notiz mit Label versehen',
     create_label: 'Label erstellen',
     list_item: 'Listeneintrag',
+    list_item_hint: 'Tipp: Beginne eine Zeile mit ## für eine Zwischenüberschrift',
     delete_item: 'Eintrag löschen',
+    delete_heading: 'Zwischenüberschrift löschen',
     remove_label: 'Label entfernen',
     pin: 'Anpinnen',
     unpin: 'Lösen',
@@ -718,15 +722,20 @@ function toggleTaskInContent(content, taskIndex) {
 }
 
 // ===================================================================
-// Checklist model (Phase B) — markdown task lines as structured items.
-// Canonical order in `content`: all unchecked first (in order), then all
-// checked (in order). The pure helpers below preserve that invariant so the
-// card preview, the modal and a reload always agree.
+// Checklist model (Phase B) — markdown lines as structured entries. An entry is
+// either an item ({checked, text}, stored "- [ ] x" / "- [x] x") or a subheading
+// ({heading: true, text}, stored "## x"). Subheadings split the list into
+// sections; the canonical order keeps unchecked items first then checked items
+// WITHIN EACH section (a heading-free list is a single section — the original
+// global invariant). The pure helpers below preserve that order so the card
+// preview, the modal and a reload always agree. Because content is always stored
+// canonically, document order == display order, so every helper addresses an
+// entry by its index in parseChecklist(content).
 // ===================================================================
 
-// parseChecklist(content) -> [{checked, text}], reading "- [ ] x" / "- [x] x"
-// task lines (fenced code is ignored, matching toggleTaskInContent). Non-task
-// lines are dropped — a checklist note's content is exclusively task lines.
+// parseChecklist(content) -> entries in document order: {heading:true, text} for
+// "## x" lines, {checked, text} for "- [ ] x" / "- [x] x" task lines (fenced
+// code is ignored, matching toggleTaskInContent). Any other line is dropped.
 function parseChecklist(content) {
   const lines = (content || '').replace(/\r\n?/g, '\n').split('\n');
   const items = [];
@@ -734,6 +743,12 @@ function parseChecklist(content) {
   for (const line of lines) {
     if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
     if (inFence) continue;
+    const h = line.match(/^\s*#{1,6}\s+(.*)$/);
+    if (h) {
+      const text = h[1].trim();
+      if (text) items.push({ heading: true, text });
+      continue;
+    }
     const m = line.match(/^\s*[-*+]\s+\[([ xX])\]\s?(.*)$/);
     if (!m) continue;
     items.push({ checked: m[1].toLowerCase() === 'x', text: m[2] });
@@ -741,59 +756,69 @@ function parseChecklist(content) {
   return items;
 }
 
-// buildChecklistContent(items) -> markdown, enforcing the unchecked-first /
-// checked-last invariant regardless of the input array's order.
-function buildChecklistContent(items) {
-  const unchecked = items.filter((it) => !it.checked);
-  const checked = items.filter((it) => it.checked);
-  return [...unchecked, ...checked]
-    .map((it) => `- [${it.checked ? 'x' : ' '}] ${it.text}`)
-    .join('\n');
-}
-
-// Toggle the item at display-index `index` (0-based over the unchecked-first
-// ordering) and return new content with the invariant restored: a newly-checked
-// item sinks to the TOP of the completed group, a newly-unchecked item rises to
-// the BOTTOM of the unchecked group.
-function toggleChecklistItem(content, index) {
-  const items = parseChecklist(content);
-  if (index < 0 || index >= items.length) return content;
-  const unchecked = items.filter((it) => !it.checked);
-  const checked = items.filter((it) => it.checked);
-  const ordered = [...unchecked, ...checked];
-  const target = ordered[index];
-  if (!target) return content;
-  const rest = ordered.filter((it) => it !== target);
-  target.checked = !target.checked;
-  if (target.checked) {
-    // Newly checked -> top of completed group (i.e. right after all unchecked).
-    const u = rest.filter((it) => !it.checked);
-    const c = rest.filter((it) => it.checked);
-    return buildChecklistContent([...u, target, ...c]);
+// buildChecklistContent(entries) -> markdown. Headings stay put and act as
+// section dividers; within each section a stable partition puts unchecked items
+// first then checked, regardless of the input order.
+function buildChecklistContent(entries) {
+  const out = [];
+  let section = []; // items collected since the last heading
+  const flush = () => {
+    const unchecked = section.filter((it) => !it.checked);
+    const checked = section.filter((it) => it.checked);
+    for (const it of [...unchecked, ...checked]) {
+      out.push(`- [${it.checked ? 'x' : ' '}] ${it.text}`);
+    }
+    section = [];
+  };
+  for (const e of entries) {
+    if (e.heading) { flush(); out.push(`## ${e.text}`); } else section.push(e);
   }
-  // Newly unchecked -> bottom of the unchecked group.
-  const u = rest.filter((it) => !it.checked);
-  const c = rest.filter((it) => it.checked);
-  return buildChecklistContent([...u, target, ...c]);
+  flush();
+  return out.join('\n');
 }
 
-// Append a new unchecked item at the bottom of the unchecked group.
+// Toggle the item at entry-index `index`. Because content is stored
+// unchecked-first per section, the stable partition in buildChecklistContent
+// sinks a newly-checked item to the TOP of its section's completed run and
+// floats a newly-unchecked item to the BOTTOM of its unchecked run. An index
+// that misses or lands on a heading is a no-op.
+function toggleChecklistItem(content, index) {
+  const entries = parseChecklist(content);
+  const target = entries[index];
+  if (!target || target.heading) return content;
+  target.checked = !target.checked;
+  return buildChecklistContent(entries);
+}
+
+// Append a new unchecked item to the bottom of the LAST section's unchecked run.
 function appendChecklistItem(content, text) {
-  const items = parseChecklist(content);
-  const unchecked = items.filter((it) => !it.checked);
-  const checked = items.filter((it) => it.checked);
-  return buildChecklistContent([...unchecked, { checked: false, text }, ...checked]);
+  const entries = parseChecklist(content);
+  entries.push({ checked: false, text });
+  return buildChecklistContent(entries);
 }
 
-// Remove the item at display-index `index` (over the unchecked-first ordering).
+// Append a new subheading, starting a fresh section at the end of the list.
+function appendChecklistHeading(content, text) {
+  const entries = parseChecklist(content);
+  entries.push({ heading: true, text });
+  return buildChecklistContent(entries);
+}
+
+// Remove the entry (item or heading) at entry-index `index`. Dropping a heading
+// merges its items into the section above.
 function removeChecklistItem(content, index) {
-  const items = parseChecklist(content);
-  const unchecked = items.filter((it) => !it.checked);
-  const checked = items.filter((it) => it.checked);
-  const ordered = [...unchecked, ...checked];
-  if (index < 0 || index >= ordered.length) return content;
-  ordered.splice(index, 1);
-  return buildChecklistContent(ordered);
+  const entries = parseChecklist(content);
+  if (index < 0 || index >= entries.length) return content;
+  entries.splice(index, 1);
+  return buildChecklistContent(entries);
+}
+
+// Interpret a string typed into an add row: a leading "##" (markdown heading)
+// makes a subheading, anything else a plain unchecked item.
+function parseAddEntry(text) {
+  const h = text.match(/^#{1,6}\s+(.*)$/);
+  const headingText = h && h[1].trim();
+  return headingText ? { heading: true, text: headingText } : { heading: false, text };
 }
 
 // ===================================================================
@@ -1019,25 +1044,33 @@ function openMenu(anchor, items) {
 // group, and (optionally) an add-item row.
 // ===================================================================
 
-// Build checklist rows into `host` from a structured item array.
-// `items` are in canonical order (unchecked-first). Indices passed to the
-// callbacks are display indices over that ordering.
+// Build checklist rows into `host` from a structured entry array (items and
+// subheadings) in canonical order. Indices passed to the callbacks are entry
+// indices — positions in `entries`, which (because content is stored
+// canonically) equal the rows' top-to-bottom document order.
 //   opts = {
 //     interactive,            // checkboxes are clickable
-//     collapsed,              // completed group collapsed?
+//     collapsed,              // completed group collapsed? (heading-free lists)
 //     showRemove,             // show a hover × on each row
 //     onToggle(index),
 //     onRemove(index),
 //     onCollapse(),           // header click (omit to make header inert)
 //   }
-function buildChecklistRows(host, items, opts) {
+function buildChecklistRows(host, entries, opts) {
   const o = opts || {};
-  const unchecked = items.filter((it) => !it.checked);
-  const checked = items.filter((it) => it.checked);
-  // Display index maps to the unchecked-first ordering used by the pure helpers.
-  let idx = 0;
 
-  const makeRow = (item, displayIndex) => {
+  const makeRemoveButton = (label, onClick) => {
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'cl-remove';
+    rm.title = label;
+    rm.setAttribute('aria-label', label);
+    rm.innerHTML = icon('close', 16);
+    rm.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+    return rm;
+  };
+
+  const makeItemRow = (item, entryIndex) => {
     const row = document.createElement('div');
     row.className = 'cl-item' + (item.checked ? ' is-checked' : '');
     const cb = document.createElement('input');
@@ -1046,7 +1079,7 @@ function buildChecklistRows(host, items, opts) {
     cb.checked = item.checked;
     if (o.interactive && o.onToggle) {
       cb.addEventListener('click', (e) => e.stopPropagation());
-      cb.addEventListener('change', (e) => { e.stopPropagation(); o.onToggle(displayIndex); });
+      cb.addEventListener('change', (e) => { e.stopPropagation(); o.onToggle(entryIndex); });
     } else {
       cb.disabled = true;
     }
@@ -1055,21 +1088,40 @@ function buildChecklistRows(host, items, opts) {
     text.innerHTML = renderInline(escapeHtml(item.text));
     row.append(cb, text);
     if (o.showRemove && o.onRemove) {
-      const rm = document.createElement('button');
-      rm.type = 'button';
-      rm.className = 'cl-remove';
-      rm.title = t('delete_item');
-      rm.setAttribute('aria-label', t('delete_item'));
-      rm.innerHTML = icon('close', 16);
-      rm.addEventListener('click', (e) => { e.stopPropagation(); o.onRemove(displayIndex); });
-      row.appendChild(rm);
+      row.appendChild(makeRemoveButton(t('delete_item'), () => o.onRemove(entryIndex)));
     }
     return row;
   };
 
-  unchecked.forEach((item) => host.appendChild(makeRow(item, idx++)));
+  const makeHeadingRow = (heading, entryIndex) => {
+    const row = document.createElement('div');
+    row.className = 'cl-heading';
+    const text = document.createElement('span');
+    text.className = 'cl-heading-text';
+    text.innerHTML = renderInline(escapeHtml(heading.text));
+    row.appendChild(text);
+    if (o.showRemove && o.onRemove) {
+      row.appendChild(makeRemoveButton(t('delete_heading'), () => o.onRemove(entryIndex)));
+    }
+    return row;
+  };
 
-  if (checked.length) {
+  // With subheadings the list renders strictly in document order — items sink
+  // only within their own section (see buildChecklistContent), so there is no
+  // global completed group. A heading-free list keeps the classic layout:
+  // unchecked on top, then a collapsible "completed" group.
+  if (entries.some((e) => e.heading)) {
+    entries.forEach((e, i) => {
+      host.appendChild(e.heading ? makeHeadingRow(e, i) : makeItemRow(e, i));
+    });
+    return;
+  }
+
+  entries.forEach((item, i) => { if (!item.checked) host.appendChild(makeItemRow(item, i)); });
+
+  const checkedIdx = [];
+  entries.forEach((item, i) => { if (item.checked) checkedIdx.push(i); });
+  if (checkedIdx.length) {
     const header = document.createElement('div');
     header.className = 'cl-completed-head' + (o.onCollapse ? ' is-clickable' : '');
     const chev = document.createElement('span');
@@ -1077,9 +1129,9 @@ function buildChecklistRows(host, items, opts) {
     chev.innerHTML = icon('chevron', 18);
     const label = document.createElement('span');
     label.className = 'cl-completed-label';
-    label.textContent = checked.length === 1
-      ? t('completed_one', { n: checked.length })
-      : t('completed_many', { n: checked.length });
+    label.textContent = checkedIdx.length === 1
+      ? t('completed_one', { n: checkedIdx.length })
+      : t('completed_many', { n: checkedIdx.length });
     header.append(chev, label);
     if (o.onCollapse) {
       header.addEventListener('click', (e) => { e.stopPropagation(); o.onCollapse(); });
@@ -1089,10 +1141,8 @@ function buildChecklistRows(host, items, opts) {
     if (!o.collapsed) {
       const group = document.createElement('div');
       group.className = 'cl-completed-group';
-      checked.forEach((item) => group.appendChild(makeRow(item, idx++)));
+      checkedIdx.forEach((i) => group.appendChild(makeItemRow(entries[i], i)));
       host.appendChild(group);
-    } else {
-      idx += checked.length; // keep display indices aligned even when hidden
     }
   }
 }
@@ -1140,6 +1190,7 @@ function makeAddItemRow(onSubmit) {
   input.type = 'text';
   input.className = 'cl-add-input';
   input.placeholder = t('list_item');
+  input.title = t('list_item_hint'); // "## …" starts a subheading
   const submit = () => {
     const text = input.value.trim();
     if (!text) return;
@@ -1180,7 +1231,10 @@ function toggleChecklistAt(m, index) {
 
 function addChecklistItem(m, text) {
   const cur = liveMemo(m);
-  persistChecklistContent(cur, appendChecklistItem(cur.content, text));
+  const entry = parseAddEntry(text);
+  persistChecklistContent(cur, entry.heading
+    ? appendChecklistHeading(cur.content, entry.text)
+    : appendChecklistItem(cur.content, entry.text));
 }
 
 function removeChecklistAt(m, index) {
@@ -2259,7 +2313,8 @@ async function onComposerImageFiles(fileList) {
 
 // Render the composer's interactive checklist editor (items + add-row) from the
 // in-memory composerItems. Toggles and adds update local state only (the note is
-// not created until commit) and keep the unchecked-first / checked-last order.
+// not created until commit) and keep the canonical order (unchecked-first per
+// section; "## …" adds a subheading that starts a new section).
 function renderComposerChecklist() {
   composerChecklistEl.innerHTML = '';
   // Normalize order so the preview/commit and the UI agree.
@@ -2278,7 +2333,10 @@ function renderComposerChecklist() {
     },
   });
   composerChecklistEl.appendChild(makeAddItemRow((text) => {
-    composerItems.push({ checked: false, text });
+    const entry = parseAddEntry(text);
+    composerItems.push(entry.heading
+      ? { heading: true, text: entry.text }
+      : { checked: false, text: entry.text });
     renderComposerChecklist();
     // Refocus the (re-rendered) add input for fast sequential entry.
     const inp = composerChecklistEl.querySelector('.cl-add-input');
@@ -2291,6 +2349,8 @@ function renderComposerChecklist() {
 function syncTextareaToItems() {
   const lines = editor.value.split('\n').map((l) => l.trim()).filter((l) => l !== '');
   composerItems = lines.map((l) => {
+    const h = l.match(/^#{1,6}\s+(.*)$/);
+    if (h && h[1].trim()) return { heading: true, text: h[1].trim() };
     const m = l.match(/^[-*+]\s+\[([ xX])\]\s?(.*)$/);
     if (m) return { checked: m[1].toLowerCase() === 'x', text: m[2] };
     return { checked: false, text: l.replace(/^[-*+]\s+/, '') };
