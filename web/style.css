@@ -448,6 +448,48 @@ a { color: inherit; }
 .cl-heading-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .cl-heading:hover .cl-remove { opacity: 1; }
 
+/* Inline editing (modal + composer): each item/heading text is a borderless,
+   auto-growing textarea that reads like plain text. */
+.cl-text-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  resize: none;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+  line-height: 1.45;
+  min-height: 1.45em;
+  overflow-wrap: anywhere;
+}
+.cl-text-input::placeholder { color: var(--muted); }
+.cl-item.is-checked .cl-text-input { text-decoration: line-through; color: var(--muted); }
+
+/* Drag-to-reorder grip: hidden until the row is hovered. */
+.cl-drag {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  margin: 1px 0 0 -4px;
+  color: var(--muted);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity .12s;
+  touch-action: none;
+}
+.cl-heading .cl-drag { align-self: center; margin-top: 0; }
+.cl-item:hover .cl-drag, .cl-heading:hover .cl-drag { opacity: .65; }
+.cl-drag:hover { opacity: 1; }
+.cl-drag:active { cursor: grabbing; }
+.cl-dragging { opacity: .4; }
+.cl-item.cl-drop-before, .cl-heading.cl-drop-before { box-shadow: inset 0 2px 0 -0.5px #1a73e8; }
+.cl-item.cl-drop-after, .cl-heading.cl-drop-after { box-shadow: inset 0 -2px 0 -0.5px #1a73e8; }
+
 .cl-add { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .cl-add-ico { display: inline-flex; align-items: center; color: var(--muted); flex: 0 0 auto; }
 .cl-add-input {

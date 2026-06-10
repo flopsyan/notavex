@@ -47,6 +47,7 @@ const STRINGS = {
     list_item_hint: 'Tip: start a line with ## to add a subheading',
     delete_item: 'Delete item',
     delete_heading: 'Delete subheading',
+    drag_reorder: 'Drag to reorder',
     remove_label: 'Remove label',
     // card actions
     pin: 'Pin',
@@ -167,6 +168,7 @@ const STRINGS = {
     list_item_hint: 'Tipp: Beginne eine Zeile mit ## für eine Zwischenüberschrift',
     delete_item: 'Eintrag löschen',
     delete_heading: 'Zwischenüberschrift löschen',
+    drag_reorder: 'Zum Umsortieren ziehen',
     remove_label: 'Label entfernen',
     pin: 'Anpinnen',
     unpin: 'Lösen',
@@ -407,12 +409,15 @@ function icon(name, size = 20) {
 
 // ---------- small helpers ----------
 
-async function api(method, path, body) {
+async function api(method, path, body, extra) {
   const opts = { method, headers: {} };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
+  // keepalive lets a small save (checklist text, title) survive page unload so
+  // Ctrl+W / navigation doesn't drop it. Not for image saves (64KB cap).
+  if (extra && extra.keepalive) opts.keepalive = true;
   const res = await fetch('/api' + path, opts);
   if (res.status === 401) {
     window.location.href = '/login';
@@ -820,6 +825,27 @@ function parseAddEntry(text) {
   return headingText ? { heading: true, text: headingText } : { heading: false, text };
 }
 
+// Replace the text of the entry at `index` (newlines collapse to spaces). Empty
+// text removes the entry — clearing an item deletes it, Google Keep style.
+function setChecklistEntryText(content, index, text) {
+  const entries = parseChecklist(content);
+  const e = entries[index];
+  if (!e) return content;
+  const clean = text.replace(/[\r\n]+/g, ' ').trim();
+  if (!clean) entries.splice(index, 1); else e.text = clean;
+  return buildChecklistContent(entries);
+}
+
+// Move the entry at `from` next to the entry at `over` (above it when `before`).
+// Reuses computeReorder for the index math, then re-canonicalizes — so a manual
+// order among unchecked items sticks while checked items still sink per section.
+function reorderChecklist(content, from, over, before) {
+  const entries = parseChecklist(content);
+  const res = computeReorder(entries.map((_, i) => i), from, over, before);
+  if (!res) return content;
+  return buildChecklistContent(res.ids.map((i) => entries[i]));
+}
+
 // ===================================================================
 // Drag-and-drop reorder math (pure, unit-tested).
 // ===================================================================
@@ -1043,20 +1069,30 @@ function openMenu(anchor, items) {
 // group, and (optionally) an add-item row.
 // ===================================================================
 
+// Entry index currently being dragged within an editable checklist (else null).
+let clDragFrom = null;
+
 // Build checklist rows into `host` from a structured entry array (items and
 // subheadings) in canonical order. Indices passed to the callbacks are entry
 // indices — positions in `entries`, which (because content is stored
 // canonically) equal the rows' top-to-bottom document order.
 //   opts = {
 //     interactive,            // checkboxes are clickable
+//     editable,               // text becomes editable fields + drag handles
 //     collapsed,              // completed group collapsed? (heading-free lists)
 //     showRemove,             // show a hover × on each row
 //     onToggle(index),
 //     onRemove(index),
+//     onEdit(index, text),    // committed item/heading text (editable only)
+//     onMove(from, over, before), // drag-reorder (editable only)
 //     onCollapse(),           // header click (omit to make header inert)
 //   }
 function buildChecklistRows(host, entries, opts) {
   const o = opts || {};
+  const enableDnD = !!(o.editable && o.onMove);
+
+  const clearDrop = () => host.querySelectorAll('.cl-drop-before, .cl-drop-after')
+    .forEach((r) => r.classList.remove('cl-drop-before', 'cl-drop-after'));
 
   const makeRemoveButton = (label, onClick) => {
     const rm = document.createElement('button');
@@ -1069,9 +1105,87 @@ function buildChecklistRows(host, entries, opts) {
     return rm;
   };
 
+  // A borderless, auto-growing textarea that reads as inline text. Commits the
+  // newline-stripped, trimmed value on blur and on Enter; unchanged is a no-op.
+  const makeEditableField = (initial, className, onCommit) => {
+    const ta = document.createElement('textarea');
+    ta.className = className;
+    ta.rows = 1;
+    ta.value = initial;
+    ta.spellcheck = false;
+    let committed = initial.trim();
+    const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+    ta.addEventListener('input', () => {
+      if (/[\r\n]/.test(ta.value)) ta.value = ta.value.replace(/[\r\n]+/g, ' ');
+      resize();
+    });
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); ta.blur(); }
+      e.stopPropagation();
+    });
+    ta.addEventListener('blur', () => {
+      const val = ta.value.replace(/[\r\n]+/g, ' ').trim();
+      if (val === committed) return;
+      committed = val;
+      onCommit(val);
+    });
+    requestAnimationFrame(resize); // size once it is in the DOM
+    return ta;
+  };
+
+  // A drag grip; HTML5 drag starts here so the text field stays selectable.
+  const makeDragHandle = (row, entryIndex) => {
+    const handle = document.createElement('span');
+    handle.className = 'cl-drag';
+    handle.title = t('drag_reorder');
+    handle.setAttribute('aria-label', t('drag_reorder'));
+    handle.innerHTML = icon('drag', 18);
+    handle.draggable = true;
+    handle.addEventListener('mousedown', (e) => e.stopPropagation());
+    handle.addEventListener('dragstart', (e) => {
+      clDragFrom = entryIndex;
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', String(entryIndex)); } catch (_) { /* ignore */ }
+      try { e.dataTransfer.setDragImage(row, 0, 0); } catch (_) { /* ignore */ }
+      requestAnimationFrame(() => row.classList.add('cl-dragging'));
+    });
+    handle.addEventListener('dragend', () => {
+      clDragFrom = null;
+      row.classList.remove('cl-dragging');
+      clearDrop();
+    });
+    return handle;
+  };
+
+  // Make `row` a drop target: a top/bottom indicator follows the cursor, and a
+  // drop reorders the dragged entry next to this one.
+  const attachRowDrop = (row, entryIndex) => {
+    row.addEventListener('dragover', (e) => {
+      if (clDragFrom == null || clDragFrom === entryIndex) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const r = row.getBoundingClientRect();
+      const before = e.clientY < r.top + r.height / 2;
+      row.classList.toggle('cl-drop-before', before);
+      row.classList.toggle('cl-drop-after', !before);
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('cl-drop-before', 'cl-drop-after'));
+    row.addEventListener('drop', (e) => {
+      if (clDragFrom == null) return;
+      e.preventDefault();
+      const r = row.getBoundingClientRect();
+      const before = e.clientY < r.top + r.height / 2;
+      const from = clDragFrom;
+      clDragFrom = null;
+      clearDrop();
+      if (from !== entryIndex) o.onMove(from, entryIndex, before);
+    });
+  };
+
   const makeItemRow = (item, entryIndex) => {
     const row = document.createElement('div');
-    row.className = 'cl-item' + (item.checked ? ' is-checked' : '');
+    row.className = 'cl-item' + (item.checked ? ' is-checked' : '') + (o.editable ? ' is-editable' : '');
+    if (enableDnD) { row.appendChild(makeDragHandle(row, entryIndex)); attachRowDrop(row, entryIndex); }
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.className = 'cl-check';
@@ -1082,10 +1196,15 @@ function buildChecklistRows(host, entries, opts) {
     } else {
       cb.disabled = true;
     }
-    const text = document.createElement('span');
-    text.className = 'cl-text';
-    text.innerHTML = renderInline(escapeHtml(item.text));
-    row.append(cb, text);
+    let textEl;
+    if (o.editable && o.onEdit) {
+      textEl = makeEditableField(item.text, 'cl-text cl-text-input', (val) => o.onEdit(entryIndex, val));
+    } else {
+      textEl = document.createElement('span');
+      textEl.className = 'cl-text';
+      textEl.innerHTML = renderInline(escapeHtml(item.text));
+    }
+    row.append(cb, textEl);
     if (o.showRemove && o.onRemove) {
       row.appendChild(makeRemoveButton(t('delete_item'), () => o.onRemove(entryIndex)));
     }
@@ -1094,11 +1213,17 @@ function buildChecklistRows(host, entries, opts) {
 
   const makeHeadingRow = (heading, entryIndex) => {
     const row = document.createElement('div');
-    row.className = 'cl-heading';
-    const text = document.createElement('span');
-    text.className = 'cl-heading-text';
-    text.innerHTML = renderInline(escapeHtml(heading.text));
-    row.appendChild(text);
+    row.className = 'cl-heading' + (o.editable ? ' is-editable' : '');
+    if (enableDnD) { row.appendChild(makeDragHandle(row, entryIndex)); attachRowDrop(row, entryIndex); }
+    let textEl;
+    if (o.editable && o.onEdit) {
+      textEl = makeEditableField(heading.text, 'cl-heading-text cl-text-input', (val) => o.onEdit(entryIndex, val));
+    } else {
+      textEl = document.createElement('span');
+      textEl.className = 'cl-heading-text';
+      textEl.innerHTML = renderInline(escapeHtml(heading.text));
+    }
+    row.appendChild(textEl);
     if (o.showRemove && o.onRemove) {
       row.appendChild(makeRemoveButton(t('delete_heading'), () => o.onRemove(entryIndex)));
     }
@@ -1157,10 +1282,13 @@ function renderChecklist(m, { interactive } = {}, extra = {}) {
 
   buildChecklistRows(wrap, items, {
     interactive,
+    editable: !!extra.editable,
     collapsed: !!m.completedCollapsed,
     showRemove: !!extra.showRemove,
     onToggle: interactive ? (index) => toggleChecklistAt(m, index) : null,
     onRemove: extra.showRemove ? (index) => removeChecklistAt(m, index) : null,
+    onEdit: extra.editable ? (index, text) => editChecklistAt(m, index, text) : null,
+    onMove: extra.editable ? (from, over, before) => reorderChecklistAt(m, from, over, before) : null,
     onCollapse: interactive ? () => toggleChecklistCollapse(m) : null,
   });
 
@@ -1218,12 +1346,14 @@ function liveMemo(m) { return state.all.find((x) => x.id === m.id) || m; }
 async function persistChecklistContent(m, content) {
   const cur = liveMemo(m);
   if (content === cur.content) return;
+  pendingSaves++;
   try {
-    const upd = await api('PUT', '/memos/' + cur.id, { content });
+    const upd = await api('PUT', '/memos/' + cur.id, { content }, { keepalive: true });
     patchMemo(upd);
     rebuildCard(upd);
     if (modalMemo && modalMemo.id === upd.id) refreshModalBody(upd);
   } catch (err) { alert(err.message); }
+  finally { pendingSaves--; }
 }
 
 function toggleChecklistAt(m, index) {
@@ -1242,6 +1372,16 @@ function addChecklistItem(m, text) {
 function removeChecklistAt(m, index) {
   const cur = liveMemo(m);
   persistChecklistContent(cur, removeChecklistItem(cur.content, index));
+}
+
+function editChecklistAt(m, index, text) {
+  const cur = liveMemo(m);
+  persistChecklistContent(cur, setChecklistEntryText(cur.content, index, text));
+}
+
+function reorderChecklistAt(m, from, over, before) {
+  const cur = liveMemo(m);
+  persistChecklistContent(cur, reorderChecklist(cur.content, from, over, before));
 }
 
 async function toggleChecklistCollapse(m) {
@@ -1727,6 +1867,7 @@ let modalBodyTextarea = null; // present only for non-checklist notes
 let modalChips = null;        // label chips container
 let modalSurface = null;
 let modalAddFocusPending = false; // re-focus the add input after an item add
+let pendingSaves = 0;             // in-flight keepalive saves (for beforeunload)
 
 function openModal(m) {
   if (modalMemo) return; // already open
@@ -1812,7 +1953,7 @@ function fillModalBody(m) {
   host.innerHTML = '';
   modalBodyTextarea = null;
   if (m.checklist === true) {
-    host.appendChild(renderChecklist(m, { interactive: true }, { showAdd: true, showRemove: true }));
+    host.appendChild(renderChecklist(m, { interactive: true }, { showAdd: true, showRemove: true, editable: true }));
   } else {
     const ta = document.createElement('textarea');
     ta.className = 'modal-textarea';
@@ -2002,6 +2143,30 @@ async function closeModal() {
     rebuildCard(upd);
     loadMeta();
   } catch (err) { alert(err.message); }
+}
+
+// Best-effort flush of in-progress modal edits when the page is closing
+// (Ctrl+W / navigation). Blurring the focused field fires its keepalive commit;
+// the modal title/body otherwise only persist on close, so push those too. The
+// beforeunload confirm (registered in init) keeps the page alive long enough for
+// these keepalive requests to be delivered.
+function flushModalOnUnload() {
+  const ae = document.activeElement;
+  if (ae && ae.classList
+    && (ae.classList.contains('cl-add-input') || ae.classList.contains('cl-text-input'))) {
+    ae.blur(); // commits via makeAddItemRow / makeEditableField -> persistChecklistContent
+  }
+  if (!modalMemo) return;
+  const fields = {};
+  if (modalTitleInput && modalTitleInput.value.trim() !== (modalMemo.title || '')) {
+    fields.title = modalTitleInput.value.trim();
+  }
+  if (modalBodyTextarea && modalBodyTextarea.value !== modalMemo.content) {
+    fields.content = modalBodyTextarea.value;
+  }
+  if (!Object.keys(fields).length) return;
+  pendingSaves++;
+  api('PUT', '/memos/' + modalMemo.id, fields, { keepalive: true }).finally(() => { pendingSaves--; });
 }
 
 // ===================================================================
@@ -2318,6 +2483,7 @@ function renderComposerChecklist() {
   composerItems = parseChecklist(buildChecklistContent(composerItems));
   buildChecklistRows(composerChecklistEl, composerItems, {
     interactive: true,
+    editable: true,
     collapsed: false,
     showRemove: true,
     onToggle: (index) => {
@@ -2326,6 +2492,14 @@ function renderComposerChecklist() {
     },
     onRemove: (index) => {
       composerItems = parseChecklist(removeChecklistItem(buildChecklistContent(composerItems), index));
+      renderComposerChecklist();
+    },
+    onEdit: (index, text) => {
+      composerItems = parseChecklist(setChecklistEntryText(buildChecklistContent(composerItems), index, text));
+      renderComposerChecklist();
+    },
+    onMove: (from, over, before) => {
+      composerItems = parseChecklist(reorderChecklist(buildChecklistContent(composerItems), from, over, before));
       renderComposerChecklist();
     },
   });
@@ -3016,6 +3190,13 @@ async function init() {
   window.addEventListener('resize', debounce(() => { closePopovers(); relayoutAll(); loadRail(); }, 150));
   // Popovers are anchored in page coordinates; drop them on scroll to avoid drift.
   window.addEventListener('scroll', () => closePopovers(), { passive: true });
+
+  // Save-on-leave (Ctrl+W / navigation): flush pending edits, then if a save is
+  // still in flight ask the browser to confirm leaving so it can complete.
+  window.addEventListener('beforeunload', (e) => {
+    flushModalOnUnload();
+    if (pendingSaves > 0) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   try {
     const cfg = await api('GET', '/config');
