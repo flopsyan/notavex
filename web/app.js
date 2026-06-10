@@ -1416,12 +1416,14 @@ function noteCard(m) {
 
   el.appendChild(buildActions(el, m));
 
-  // Click a card -> open the modal editor. Trash stays read-only. Ignore clicks
-  // that started on an interactive control (buttons, links, inputs, the action
-  // rows, label chips, the checklist) so those keep their own behavior.
+  // Click anywhere on a card -> open the modal editor (Google Keep style). Trash
+  // stays read-only. Only actual controls opt out: buttons (action icons, label
+  // chips, checklist ×), links, form inputs (incl. checklist checkboxes) and the
+  // bottom action toolbar. The checklist checkboxes and collapse header also
+  // stopPropagation, so clicking them never bubbles up here.
   if (state.view !== 'trash') {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('button,a,input,textarea,.note-actions,.note-labels,.note-checklist')) return;
+      if (e.target.closest('button,a,input,textarea,.note-actions')) return;
       openModal(m);
     });
     // Drag-and-drop reordering (active view only — see attachDrag).
