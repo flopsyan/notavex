@@ -179,3 +179,31 @@ func TestValidateImages(t *testing.T) {
 		t.Error("over-limit image list should be rejected")
 	}
 }
+
+func TestLoginLimiter(t *testing.T) {
+	l := newLoginLimiter()
+	if l.blocked("a") {
+		t.Fatal("fresh IP must not be blocked")
+	}
+	for i := 0; i < loginMaxFails; i++ {
+		if l.blocked("a") {
+			t.Fatalf("blocked after only %d failures", i)
+		}
+		l.fail("a")
+	}
+	if !l.blocked("a") {
+		t.Fatal("must be blocked after loginMaxFails failures")
+	}
+	if l.blocked("b") {
+		t.Fatal("other IP must not be blocked")
+	}
+	l.reset("a")
+	if l.blocked("a") {
+		t.Fatal("reset must unblock")
+	}
+	// An expired window no longer blocks.
+	l.fails["c"] = failWindow{count: loginMaxFails, start: time.Now().Add(-loginFailWindow - time.Second)}
+	if l.blocked("c") {
+		t.Fatal("expired window must not block")
+	}
+}

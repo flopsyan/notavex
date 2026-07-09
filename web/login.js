@@ -8,6 +8,7 @@ const STRINGS = {
     login_password: 'Password',
     login_signin: 'Sign in',
     login_wrong: 'Wrong username or password.',
+    login_rate: 'Too many failed attempts. Please try again later.',
     login_failed: 'Sign in failed.',
     login_network: 'Network error. Please try again.',
   },
@@ -17,6 +18,7 @@ const STRINGS = {
     login_password: 'Passwort',
     login_signin: 'Anmelden',
     login_wrong: 'Benutzername oder Passwort falsch.',
+    login_rate: 'Zu viele Fehlversuche. Bitte versuche es später erneut.',
     login_failed: 'Anmeldung fehlgeschlagen.',
     login_network: 'Netzwerkfehler. Bitte versuche es erneut.',
   },
@@ -57,7 +59,8 @@ form.addEventListener('submit', async (e) => {
       window.location.href = '/';
       return;
     }
-    errorBox.textContent = res.status === 401 ? t('login_wrong') : t('login_failed');
+    errorBox.textContent = res.status === 401 ? t('login_wrong')
+      : res.status === 429 ? t('login_rate') : t('login_failed');
     errorBox.hidden = false;
     passwordInput.select();
   } catch (err) {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -28,12 +30,13 @@ type Server struct {
 	store  *Store
 	auth   *Auth
 	static fs.FS
+	logins *loginLimiter
 }
 
 // NewServer creates a Server. static must be a filesystem rooted at the web
 // assets (index.html, app.js, ...).
 func NewServer(store *Store, auth *Auth, static fs.FS) *Server {
-	return &Server{store: store, auth: auth, static: static}
+	return &Server{store: store, auth: auth, static: static, logins: newLoginLimiter()}
 }
 
 // Routes builds the HTTP handler for the whole application.
@@ -41,7 +44,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// Static assets (CSS/JS) are always public.
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(s.static)))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticHandler()))
 
 	// Auth + account endpoints.
 	mux.HandleFunc("POST /api/login", s.handleLogin)
@@ -60,13 +63,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/memos/{id}", s.requireAuth(s.handleGetMemo))
 	mux.HandleFunc("PUT /api/memos/{id}", s.requireAuth(s.handleUpdateMemo))
 	mux.HandleFunc("DELETE /api/memos/{id}", s.requireAuth(s.handleDeleteMemo))
-	mux.HandleFunc("POST /api/memos/{id}/pin", s.requireAuth(s.handlePinMemo))
+	mux.HandleFunc("POST /api/memos/{id}/pin", s.requireAuth(s.handleMemoFlag("pinned", s.store.SetPinned)))
 	mux.HandleFunc("POST /api/memos/{id}/color", s.requireAuth(s.handleSetColor))
-	mux.HandleFunc("POST /api/memos/{id}/archive", s.requireAuth(s.handleArchiveMemo))
-	mux.HandleFunc("POST /api/memos/{id}/trash", s.requireAuth(s.handleTrashMemo))
+	mux.HandleFunc("POST /api/memos/{id}/archive", s.requireAuth(s.handleMemoFlag("archived", s.store.SetArchived)))
+	mux.HandleFunc("POST /api/memos/{id}/trash", s.requireAuth(s.handleMemoFlag("trashed", s.store.SetTrashed)))
 	mux.HandleFunc("POST /api/memos/{id}/duplicate", s.requireAuth(s.handleDuplicateMemo))
 	mux.HandleFunc("POST /api/memos/{id}/move", s.requireAuth(s.handleMoveMemo))
-	mux.HandleFunc("POST /api/memos/{id}/collapsed", s.requireAuth(s.handleCollapseMemo))
+	mux.HandleFunc("POST /api/memos/{id}/collapsed", s.requireAuth(s.handleMemoFlag("collapsed", s.store.SetCompletedCollapsed)))
 	mux.HandleFunc("GET /api/labels", s.requireAuth(s.handleLabels))
 	mux.HandleFunc("GET /api/stats", s.requireAuth(s.handleStats))
 
@@ -98,11 +101,42 @@ func (s *Server) withCommon(next http.Handler) http.Handler {
 			"default-src 'self'; img-src 'self' https: data:; "+
 				"style-src 'self' 'unsafe-inline'; script-src 'self'; "+
 				"base-uri 'none'; frame-ancestors 'none'")
+		if s.auth.secure {
+			// NOTAVEX_SECURE means HTTPS terminates in front of Notavex.
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(rec, r)
 		log.Printf("%s %s -> %d (%s)", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
+	})
+}
+
+// staticHandler serves the embedded web assets with content-hash ETags, so
+// browsers revalidate with a cheap 304 instead of re-downloading each asset on
+// every page load (embedded files carry no modification time to cache by).
+func (s *Server) staticHandler() http.Handler {
+	etags := make(map[string]string)
+	fs.WalkDir(s.static, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := fs.ReadFile(s.static, path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		etags[path] = `"` + hex.EncodeToString(sum[:16]) + `"`
+		return nil
+	})
+	files := http.FileServerFS(s.static)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tag, ok := etags[r.URL.Path]; ok {
+			w.Header().Set("ETag", tag) // ServeContent answers If-None-Match with 304
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		files.ServeHTTP(w, r)
 	})
 }
 
@@ -175,19 +209,25 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
+	ip := clientIP(r)
+	if s.logins.blocked(ip) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many failed attempts")
+		return
+	}
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request")
+	if !readJSON(w, r, &req, 4096) {
 		return
 	}
 	u, ok := s.auth.users.Authenticate(req.Username, req.Password)
 	if !ok {
+		s.logins.fail(ip)
 		writeJSONError(w, http.StatusUnauthorized, "wrong username or password")
 		return
 	}
+	s.logins.reset(ip)
 	s.setSessionCookie(w, u)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -232,8 +272,7 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		CurrentPassword string `json:"currentPassword"`
 		NewPassword     string `json:"newPassword"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request")
+	if !readJSON(w, r, &req, 4096) {
 		return
 	}
 	if !verifySaltedHash(req.CurrentPassword, u.PassHash, u.PassSalt, u.Iter) {
@@ -264,8 +303,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DisplayName string `json:"displayName"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request")
+	if !readJSON(w, r, &req, 4096) {
 		return
 	}
 	pu, err := s.auth.users.UpdateDisplayName(u.ID, req.DisplayName)
@@ -287,8 +325,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		DisplayName string `json:"displayName"`
 		Password    string `json:"password"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request")
+	if !readJSON(w, r, &req, 4096) {
 		return
 	}
 	pu, err := s.auth.users.Create(req.Username, req.DisplayName, req.Password, false)
@@ -370,8 +407,7 @@ func (s *Server) handleCreateMemo(w http.ResponseWriter, r *http.Request) {
 		Checklist bool     `json:"checklist"`
 		Images    []string `json:"images"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMemoBody)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSON(w, r, &req, maxMemoBody) {
 		return
 	}
 	if len(req.Content) > maxContentLen {
@@ -430,8 +466,7 @@ func (s *Server) handleUpdateMemo(w http.ResponseWriter, r *http.Request) {
 		Checklist *bool     `json:"checklist"`
 		Images    *[]string `json:"images"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMemoBody)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSON(w, r, &req, maxMemoBody) {
 		return
 	}
 	if req.Content != nil && len(*req.Content) > maxContentLen {
@@ -474,24 +509,25 @@ func (s *Server) handleDeleteMemo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handlePinMemo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+// handleMemoFlag builds a handler for the single-bool memo actions (pin,
+// archive, trash, collapsed): it decodes {<field>: bool} and applies it.
+func (s *Server) handleMemoFlag(field string, apply func(id int64, v bool) (*Memo, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		var req map[string]bool
+		if !readJSON(w, r, &req, 4096) {
+			return
+		}
+		m, err := apply(id, req[field])
+		if err != nil {
+			s.writeStoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, m)
 	}
-	var req struct {
-		Pinned bool `json:"pinned"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	m, err := s.store.SetPinned(id, req.Pinned)
-	if err != nil {
-		s.writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, m)
 }
 
 func (s *Server) handleSetColor(w http.ResponseWriter, r *http.Request) {
@@ -502,8 +538,7 @@ func (s *Server) handleSetColor(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Color string `json:"color"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSON(w, r, &req, 4096) {
 		return
 	}
 	if !validColor(req.Color) {
@@ -511,46 +546,6 @@ func (s *Server) handleSetColor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := s.store.SetColor(id, req.Color)
-	if err != nil {
-		s.writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, m)
-}
-
-func (s *Server) handleArchiveMemo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var req struct {
-		Archived bool `json:"archived"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	m, err := s.store.SetArchived(id, req.Archived)
-	if err != nil {
-		s.writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, m)
-}
-
-func (s *Server) handleTrashMemo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var req struct {
-		Trashed bool `json:"trashed"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	m, err := s.store.SetTrashed(id, req.Trashed)
 	if err != nil {
 		s.writeStoreError(w, err)
 		return
@@ -579,31 +574,10 @@ func (s *Server) handleMoveMemo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AfterID int64 `json:"afterId"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+	if !readJSON(w, r, &req, 4096) {
 		return
 	}
 	m, err := s.store.Move(id, req.AfterID)
-	if err != nil {
-		s.writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, m)
-}
-
-func (s *Server) handleCollapseMemo(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var req struct {
-		Collapsed bool `json:"collapsed"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	m, err := s.store.SetCompletedCollapsed(id, req.Collapsed)
 	if err != nil {
 		s.writeStoreError(w, err)
 		return
@@ -634,6 +608,16 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- helpers ----------
+
+// readJSON decodes a size-limited JSON request body into dst, answering with a
+// 400 on failure. Returns false when the request was rejected.
+func readJSON(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(dst); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	return true
+}
 
 func (s *Server) writeStoreError(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrNotFound) {

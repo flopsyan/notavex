@@ -1451,6 +1451,8 @@ function pickImages(onPicked) {
     input.remove();
     if (urls.length) onPicked(urls);
   }, { once: true });
+  // A dismissed picker fires no change event; drop the input instead of leaking it.
+  input.addEventListener('cancel', () => input.remove(), { once: true });
   input.click();
 }
 

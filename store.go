@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -134,26 +133,7 @@ func (s *Store) save() error {
 	if err != nil {
 		return err
 	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".notavex-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename below succeeds
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, s.path)
+	return writeFileAtomic(s.path, data, 0o600)
 }
 
 // normalizeLabels cleans a user-supplied label list: it trims each entry, drops
@@ -289,9 +269,11 @@ type UpdateMemo struct {
 	Images    *[]string
 }
 
-// Update applies the supplied non-nil fields to an existing memo and bumps
-// UpdatedAt. The resulting memo must still have a title or content.
-func (s *Store) Update(id int64, in UpdateMemo) (*Memo, error) {
+// mutate looks up a memo, applies fn to it and persists the store. When fn
+// returns an error or the save fails, the memo is restored to its previous
+// value so memory stays consistent with disk. fn must replace slice fields
+// wholesale (never mutate them in place) for the rollback to be correct.
+func (s *Store) mutate(id int64, fn func(m *Memo) error) (*Memo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -299,164 +281,102 @@ func (s *Store) Update(id int64, in UpdateMemo) (*Memo, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
-
-	prevTitle, prevContent := m.Title, m.Content
-	prevLabels, prevChecklist := m.Labels, m.Checklist
-	prevImages := m.Images
-	prevUpdated := m.UpdatedAt
-
-	restore := func() {
-		m.Title, m.Content = prevTitle, prevContent
-		m.Labels, m.Checklist = prevLabels, prevChecklist
-		m.Images = prevImages
+	prev := *m
+	if err := fn(m); err != nil {
+		*m = prev
+		return nil, err
 	}
-
-	if in.Title != nil {
-		m.Title = strings.TrimSpace(*in.Title)
-	}
-	if in.Content != nil {
-		m.Content = strings.TrimSpace(*in.Content)
-	}
-	if in.Labels != nil {
-		m.Labels = normalizeLabels(*in.Labels)
-	}
-	if in.Checklist != nil {
-		m.Checklist = *in.Checklist
-	}
-	if in.Images != nil {
-		m.Images = normalizeImages(*in.Images)
-	}
-
-	if m.Title == "" && m.Content == "" && len(m.Images) == 0 {
-		restore()
-		return nil, errors.New("title, content or image required")
-	}
-
-	m.UpdatedAt = time.Now().UTC()
-
 	if err := s.save(); err != nil {
-		restore()
-		m.UpdatedAt = prevUpdated
+		*m = prev
 		return nil, err
 	}
 	return cloneMemo(m), nil
+}
+
+// Update applies the supplied non-nil fields to an existing memo and bumps
+// UpdatedAt. The resulting memo must still have a title or content.
+func (s *Store) Update(id int64, in UpdateMemo) (*Memo, error) {
+	return s.mutate(id, func(m *Memo) error {
+		if in.Title != nil {
+			m.Title = strings.TrimSpace(*in.Title)
+		}
+		if in.Content != nil {
+			m.Content = strings.TrimSpace(*in.Content)
+		}
+		if in.Labels != nil {
+			m.Labels = normalizeLabels(*in.Labels)
+		}
+		if in.Checklist != nil {
+			m.Checklist = *in.Checklist
+		}
+		if in.Images != nil {
+			m.Images = normalizeImages(*in.Images)
+		}
+		if m.Title == "" && m.Content == "" && len(m.Images) == 0 {
+			return errors.New("title, content or image required")
+		}
+		m.UpdatedAt = time.Now().UTC()
+		return nil
+	})
 }
 
 // SetPinned pins or unpins a memo. Pinning a memo un-archives it. This does not
 // change UpdatedAt.
 func (s *Store) SetPinned(id int64, pinned bool) (*Memo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	m, ok := s.memos[id]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	prevPinned, prevArchived := m.Pinned, m.Archived
-	m.Pinned = pinned
-	if pinned {
-		m.Archived = false
-	}
-
-	if err := s.save(); err != nil {
-		m.Pinned, m.Archived = prevPinned, prevArchived
-		return nil, err
-	}
-	return cloneMemo(m), nil
+	return s.mutate(id, func(m *Memo) error {
+		m.Pinned = pinned
+		if pinned {
+			m.Archived = false
+		}
+		return nil
+	})
 }
 
 // SetColor changes a memo's color label. Color does not change UpdatedAt.
 func (s *Store) SetColor(id int64, color string) (*Memo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	m, ok := s.memos[id]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	prev := m.Color
-	m.Color = color
-
-	if err := s.save(); err != nil {
-		m.Color = prev
-		return nil, err
-	}
-	return cloneMemo(m), nil
+	return s.mutate(id, func(m *Memo) error {
+		m.Color = color
+		return nil
+	})
 }
 
 // SetArchived archives or unarchives a memo. Archiving a memo unpins it. This
 // does not change UpdatedAt.
 func (s *Store) SetArchived(id int64, archived bool) (*Memo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	m, ok := s.memos[id]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	prevArchived, prevPinned := m.Archived, m.Pinned
-	m.Archived = archived
-	if archived {
-		m.Pinned = false
-	}
-
-	if err := s.save(); err != nil {
-		m.Archived, m.Pinned = prevArchived, prevPinned
-		return nil, err
-	}
-	return cloneMemo(m), nil
+	return s.mutate(id, func(m *Memo) error {
+		m.Archived = archived
+		if archived {
+			m.Pinned = false
+		}
+		return nil
+	})
 }
 
 // SetTrashed moves a memo to the trash or restores it. Trashing also unpins;
 // restoring also unarchives. This does not change UpdatedAt.
 func (s *Store) SetTrashed(id int64, trashed bool) (*Memo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	m, ok := s.memos[id]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	prevTrashed, prevTrashedAt := m.Trashed, m.TrashedAt
-	prevPinned, prevArchived := m.Pinned, m.Archived
-
-	if trashed {
-		now := time.Now().UTC()
-		m.Trashed = true
-		m.TrashedAt = &now
-		m.Pinned = false
-	} else {
-		m.Trashed = false
-		m.TrashedAt = nil
-		m.Archived = false
-	}
-
-	if err := s.save(); err != nil {
-		m.Trashed, m.TrashedAt = prevTrashed, prevTrashedAt
-		m.Pinned, m.Archived = prevPinned, prevArchived
-		return nil, err
-	}
-	return cloneMemo(m), nil
+	return s.mutate(id, func(m *Memo) error {
+		if trashed {
+			now := time.Now().UTC()
+			m.Trashed = true
+			m.TrashedAt = &now
+			m.Pinned = false
+		} else {
+			m.Trashed = false
+			m.TrashedAt = nil
+			m.Archived = false
+		}
+		return nil
+	})
 }
 
 // SetCompletedCollapsed toggles whether a checklist's completed items are hidden.
 // This does not change UpdatedAt.
 func (s *Store) SetCompletedCollapsed(id int64, collapsed bool) (*Memo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	m, ok := s.memos[id]
-	if !ok {
-		return nil, ErrNotFound
-	}
-	prev := m.CompletedCollapsed
-	m.CompletedCollapsed = collapsed
-
-	if err := s.save(); err != nil {
-		m.CompletedCollapsed = prev
-		return nil, err
-	}
-	return cloneMemo(m), nil
+	return s.mutate(id, func(m *Memo) error {
+		m.CompletedCollapsed = collapsed
+		return nil
+	})
 }
 
 // Delete permanently removes a memo.

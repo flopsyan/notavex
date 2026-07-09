@@ -9,11 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -149,6 +151,83 @@ func (a *Auth) currentUser(r *http.Request) *User {
 		return nil
 	}
 	return a.userFromToken(c.Value)
+}
+
+// Failed-login throttling: after loginMaxFails failed attempts from one client
+// within loginFailWindow, further attempts are rejected until the window ends.
+// This keeps online password guessing (and the PBKDF2 CPU cost per guess) in
+// check without any persistent state.
+const (
+	loginMaxFails   = 10
+	loginFailWindow = 15 * time.Minute
+)
+
+type failWindow struct {
+	count int
+	start time.Time
+}
+
+// loginLimiter tracks failed login attempts per client IP. Safe for concurrent use.
+type loginLimiter struct {
+	mu    sync.Mutex
+	fails map[string]failWindow
+}
+
+func newLoginLimiter() *loginLimiter {
+	return &loginLimiter{fails: make(map[string]failWindow)}
+}
+
+// blocked reports whether ip has exhausted its attempts for the current window.
+func (l *loginLimiter) blocked(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	w, ok := l.fails[ip]
+	if !ok {
+		return false
+	}
+	if time.Since(w.start) > loginFailWindow {
+		delete(l.fails, ip)
+		return false
+	}
+	return w.count >= loginMaxFails
+}
+
+// fail records a failed attempt for ip.
+func (l *loginLimiter) fail(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	// Sweep stale entries once the map grows, so rotating IPs cannot leak memory.
+	if len(l.fails) > 1000 {
+		for k, w := range l.fails {
+			if time.Since(w.start) > loginFailWindow {
+				delete(l.fails, k)
+			}
+		}
+	}
+	w := l.fails[ip]
+	if w.count == 0 || time.Since(w.start) > loginFailWindow {
+		l.fails[ip] = failWindow{count: 1, start: time.Now()}
+		return
+	}
+	w.count++
+	l.fails[ip] = w
+}
+
+// reset clears ip's failed attempts (after a successful login).
+func (l *loginLimiter) reset(ip string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.fails, ip)
+}
+
+// clientIP returns the request's remote IP without the port. Behind a reverse
+// proxy every request shares the proxy's IP, which degrades to a global limit;
+// that fails safe (never open).
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // credentials is the on-disk shape of the legacy single-user password (auth.json),
