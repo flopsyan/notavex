@@ -836,6 +836,32 @@ function setChecklistEntryText(content, index, text) {
   return buildChecklistContent(entries);
 }
 
+// Insert a new entry (item or subheading) at entry-index `index` (clamped to the
+// list). buildChecklistContent then re-partitions, so a new unchecked item lands
+// at the end of its section's unchecked run. Used by the per-section add rows so
+// a list with several subheadings can grow each section, not only the last one.
+function insertChecklistEntry(content, index, entry) {
+  const entries = parseChecklist(content);
+  const at = Math.max(0, Math.min(index, entries.length));
+  entries.splice(at, 0, entry);
+  return buildChecklistContent(entries);
+}
+
+// Enter-to-new-item: commit `text` to the item at `index` and open a fresh empty
+// item directly below it. Empty `text` deletes the current item instead (Google
+// Keep style) and adds nothing; a heading index is a no-op. Only called for
+// unchecked items, so the new item's index is always `index + 1`.
+function splitChecklistItem(content, index, text) {
+  const entries = parseChecklist(content);
+  const e = entries[index];
+  if (!e || e.heading) return content;
+  const clean = text.replace(/[\r\n]+/g, ' ').trim();
+  if (!clean) { entries.splice(index, 1); return buildChecklistContent(entries); }
+  e.text = clean;
+  entries.splice(index + 1, 0, { checked: false, text: '' });
+  return buildChecklistContent(entries);
+}
+
 // Move the entry at `from` next to the entry at `over` (above it when `before`).
 // Reuses computeReorder for the index math, then re-canonicalizes — so a manual
 // order among unchecked items sticks while checked items still sink per section.
@@ -1107,25 +1133,41 @@ function buildChecklistRows(host, entries, opts) {
 
   // A borderless, auto-growing textarea that reads as inline text. Commits the
   // newline-stripped, trimmed value on blur and on Enter; unchanged is a no-op.
-  const makeEditableField = (initial, className, onCommit) => {
+  // With `onEnter`, pressing Enter commits and hands the value to it instead of
+  // just blurring - used to open a fresh list item on the next line.
+  const makeEditableField = (initial, className, onCommit, onEnter) => {
     const ta = document.createElement('textarea');
     ta.className = className;
     ta.rows = 1;
     ta.value = initial;
     ta.spellcheck = false;
     let committed = initial.trim();
+    let handledByEnter = false; // Enter already committed/split this field
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
     ta.addEventListener('input', () => {
       if (/[\r\n]/.test(ta.value)) ta.value = ta.value.replace(/[\r\n]+/g, ' ');
       resize();
     });
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); ta.blur(); }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (onEnter) {
+          const val = ta.value.replace(/[\r\n]+/g, ' ').trim();
+          committed = val;
+          handledByEnter = true; // stop the re-render's blur from committing again
+          onEnter(val);
+        } else {
+          ta.blur();
+        }
+      }
       e.stopPropagation();
     });
     ta.addEventListener('blur', () => {
+      if (handledByEnter) return;
       const val = ta.value.replace(/[\r\n]+/g, ' ').trim();
-      if (val === committed) return;
+      // Commit real edits; also drop a field left empty (Google Keep clear-to-
+      // delete, and the cleanup for an Enter-created item that never got filled).
+      if (val === committed && val !== '') return;
       committed = val;
       onCommit(val);
     });
@@ -1198,7 +1240,11 @@ function buildChecklistRows(host, entries, opts) {
     }
     let textEl;
     if (o.editable && o.onEdit) {
-      textEl = makeEditableField(item.text, 'cl-text cl-text-input', (val) => o.onEdit(entryIndex, val));
+      // Enter opens a fresh item right below (only for unchecked items, so the
+      // new item's index stays predictable as entryIndex + 1).
+      const onEnter = !item.checked && o.onSplit ? (val) => o.onSplit(entryIndex, val) : null;
+      textEl = makeEditableField(item.text, 'cl-text cl-text-input', (val) => o.onEdit(entryIndex, val), onEnter);
+      textEl.dataset.entryIndex = String(entryIndex);
     } else {
       textEl = document.createElement('span');
       textEl.className = 'cl-text';
@@ -1230,14 +1276,42 @@ function buildChecklistRows(host, entries, opts) {
     return row;
   };
 
+  // A "+ list item" row inserting at entry-index `insertIndex`, tagged with its
+  // section ordinal so a re-render can put focus back on the same one.
+  const addRow = (insertIndex, sectionOrdinal) => {
+    if (!o.onAdd) return;
+    const row = makeAddItemRow((text, keepFocus) => o.onAdd(insertIndex, sectionOrdinal, text, keepFocus));
+    row.dataset.section = String(sectionOrdinal);
+    host.appendChild(row);
+  };
+
   // With subheadings the list renders strictly in document order — items sink
   // only within their own section (see buildChecklistContent), so there is no
-  // global completed group. A heading-free list keeps the classic layout:
-  // unchecked on top, then a collapsible "completed" group.
+  // global completed group. Every section gets its own "+ list item" row at its
+  // bottom (above the next heading), so any section can grow, not only the last.
+  // A heading-free list keeps the classic layout: unchecked on top, then a
+  // collapsible "completed" group, with a single add row underneath.
   if (entries.some((e) => e.heading)) {
+    let ordinal = 0;
+    let hasItems = false;
+    let openedByHeading = false; // this section was started by a heading
+    const closeSection = (insertIndex) => {
+      if (hasItems || openedByHeading) addRow(insertIndex, ordinal);
+      ordinal += 1;
+      hasItems = false;
+      openedByHeading = false;
+    };
     entries.forEach((e, i) => {
-      host.appendChild(e.heading ? makeHeadingRow(e, i) : makeItemRow(e, i));
+      if (e.heading) {
+        closeSection(i); // add row for the section that just ended, above this heading
+        host.appendChild(makeHeadingRow(e, i));
+        openedByHeading = true;
+      } else {
+        host.appendChild(makeItemRow(e, i));
+        hasItems = true;
+      }
     });
+    closeSection(entries.length);
     return;
   }
 
@@ -1269,6 +1343,9 @@ function buildChecklistRows(host, entries, opts) {
       host.appendChild(group);
     }
   }
+
+  // Single add row for the one (heading-free) section, below the completed group.
+  addRow(entries.length, 0);
 }
 
 // renderChecklist(m, {interactive}) -> the checklist body for a memo.
@@ -1290,16 +1367,20 @@ function renderChecklist(m, { interactive } = {}, extra = {}) {
     onEdit: extra.editable ? (index, text) => editChecklistAt(m, index, text) : null,
     onMove: extra.editable ? (from, over, before) => reorderChecklistAt(m, from, over, before) : null,
     onCollapse: interactive ? () => toggleChecklistCollapse(m) : null,
+    // Each section carries its own add row (built by buildChecklistRows). On
+    // Enter, remember which one to re-focus after the async persist for fast
+    // sequential entry; on blur, leave focus where the click went.
+    onAdd: extra.showAdd ? (index, section, text, keepFocus) => {
+      if (keepFocus) modalAddFocusSection = section;
+      addChecklistItemAt(m, index, text);
+    } : null,
+    // Enter inside an item opens a fresh item on the next line; focus it after.
+    onSplit: extra.editable ? (index, text) => {
+      modalItemFocus = text.replace(/[\r\n]+/g, ' ').trim() ? index + 1 : null;
+      splitChecklistItemAt(m, index, text);
+    } : null,
   });
 
-  if (extra.showAdd) {
-    wrap.appendChild(makeAddItemRow((text, keepFocus) => {
-      // On Enter, re-focus the (rebuilt) add input after the async persist so the
-      // modal supports fast sequential entry; on blur, leave focus where it went.
-      if (keepFocus) modalAddFocusPending = true;
-      addChecklistItem(m, text);
-    }));
-  }
   return wrap;
 }
 
@@ -1361,12 +1442,18 @@ function toggleChecklistAt(m, index) {
   persistChecklistContent(cur, toggleChecklistItem(cur.content, index));
 }
 
-function addChecklistItem(m, text) {
+// Add a new item (or "## …" subheading) into a specific section at `index`.
+function addChecklistItemAt(m, index, text) {
   const cur = liveMemo(m);
   const entry = parseAddEntry(text);
-  persistChecklistContent(cur, entry.heading
-    ? appendChecklistHeading(cur.content, entry.text)
-    : appendChecklistItem(cur.content, entry.text));
+  persistChecklistContent(cur, insertChecklistEntry(cur.content, index,
+    entry.heading ? { heading: true, text: entry.text } : { checked: false, text: entry.text }));
+}
+
+// Commit an item's edit and open a fresh item on the next line (Enter-to-new).
+function splitChecklistItemAt(m, index, text) {
+  const cur = liveMemo(m);
+  persistChecklistContent(cur, splitChecklistItem(cur.content, index, text));
 }
 
 function removeChecklistAt(m, index) {
@@ -1868,7 +1955,8 @@ let modalTitleInput = null;
 let modalBodyTextarea = null; // present only for non-checklist notes
 let modalChips = null;        // label chips container
 let modalSurface = null;
-let modalAddFocusPending = false; // re-focus the add input after an item add
+let modalAddFocusSection = null;  // section ordinal whose add input to re-focus after an add
+let modalItemFocus = null;        // entry index of the item field to focus after a split
 let pendingSaves = 0;             // in-flight keepalive saves (for beforeunload)
 
 function openModal(m) {
@@ -1978,13 +2066,19 @@ function fillModalBody(m) {
 // toggle/add/remove, color, labels). Preserves a non-checklist textarea's edits
 // and keeps the add-item input focused for fast sequential entry.
 function refreshModalBody(upd) {
-  // Re-focus the add input if the user just added an item (deterministic flag)
-  // or is currently typing in it.
+  // Decide where focus should land after the rebuild. A pending item split wins
+  // (focus the fresh item); otherwise re-focus the add input we just added into,
+  // or the one the user is currently typing in, keyed by its section ordinal.
   const ae = document.activeElement;
-  const keepAddFocus = modalAddFocusPending
-    || !!(ae && ae.classList && ae.classList.contains('cl-add-input')
-      && modalSurface && modalSurface.contains(ae));
-  modalAddFocusPending = false;
+  let addSection = modalAddFocusSection;
+  if (addSection == null && ae && ae.classList && ae.classList.contains('cl-add-input')
+      && modalSurface && modalSurface.contains(ae)) {
+    const row = ae.closest('.cl-add');
+    if (row && row.dataset.section != null) addSection = row.dataset.section;
+  }
+  const itemFocus = modalItemFocus;
+  modalAddFocusSection = null;
+  modalItemFocus = null;
   modalMemo = upd;
   if (modalSurface) {
     if (upd.color) modalSurface.dataset.color = upd.color; else delete modalSurface.dataset.color;
@@ -1994,8 +2088,12 @@ function refreshModalBody(upd) {
   // keep the user's in-progress (unsaved) edits.
   if (upd.checklist === true) {
     fillModalBody(upd);
-    if (keepAddFocus) {
-      const inp = modalSurface && modalSurface.querySelector('.cl-add-input');
+    if (itemFocus != null && modalSurface) {
+      const field = modalSurface.querySelector(`.cl-text-input[data-entry-index="${itemFocus}"]`);
+      if (field) { field.focus(); if (field.setSelectionRange) field.setSelectionRange(0, 0); }
+    } else if (addSection != null && modalSurface) {
+      const row = modalSurface.querySelector(`.cl-add[data-section="${addSection}"]`);
+      const inp = row && row.querySelector('.cl-add-input');
       if (inp) inp.focus();
     }
   }
@@ -2134,7 +2232,8 @@ async function closeModal() {
   modalBodyTextarea = null;
   modalChips = null;
   modalSurface = null;
-  modalAddFocusPending = false;
+  modalAddFocusSection = null;
+  modalItemFocus = null;
 
   if (!titleChanged && !bodyChanged) return;
   const payload = { title: titleVal };
@@ -2483,41 +2582,56 @@ function renderComposerChecklist() {
   composerChecklistEl.innerHTML = '';
   // Normalize order so the preview/commit and the UI agree.
   composerItems = parseChecklist(buildChecklistContent(composerItems));
+  const content = () => buildChecklistContent(composerItems);
+  // Re-render, then restore focus onto a specific item field or add row (the
+  // composer re-renders synchronously, so this runs right after the rebuild).
+  const rerender = (section, itemIndex) => {
+    renderComposerChecklist();
+    if (itemIndex != null) {
+      const f = composerChecklistEl.querySelector(`.cl-text-input[data-entry-index="${itemIndex}"]`);
+      if (f) { f.focus(); if (f.setSelectionRange) f.setSelectionRange(0, 0); }
+    } else if (section != null) {
+      const row = composerChecklistEl.querySelector(`.cl-add[data-section="${section}"]`);
+      const inp = row && row.querySelector('.cl-add-input');
+      if (inp) inp.focus();
+    }
+  };
   buildChecklistRows(composerChecklistEl, composerItems, {
     interactive: true,
     editable: true,
     collapsed: false,
     showRemove: true,
     onToggle: (index) => {
-      composerItems = parseChecklist(toggleChecklistItem(buildChecklistContent(composerItems), index));
+      composerItems = parseChecklist(toggleChecklistItem(content(), index));
       renderComposerChecklist();
     },
     onRemove: (index) => {
-      composerItems = parseChecklist(removeChecklistItem(buildChecklistContent(composerItems), index));
+      composerItems = parseChecklist(removeChecklistItem(content(), index));
       renderComposerChecklist();
     },
     onEdit: (index, text) => {
-      composerItems = parseChecklist(setChecklistEntryText(buildChecklistContent(composerItems), index, text));
+      composerItems = parseChecklist(setChecklistEntryText(content(), index, text));
       renderComposerChecklist();
     },
     onMove: (from, over, before) => {
-      composerItems = parseChecklist(reorderChecklist(buildChecklistContent(composerItems), from, over, before));
+      composerItems = parseChecklist(reorderChecklist(content(), from, over, before));
       renderComposerChecklist();
     },
+    // Each section has its own add row; "## …" starts a new subheading section.
+    onAdd: (index, section, text, keepFocus) => {
+      const entry = parseAddEntry(text);
+      composerItems = parseChecklist(insertChecklistEntry(content(), index,
+        entry.heading ? { heading: true, text: entry.text } : { checked: false, text: entry.text }));
+      // On Enter keep entering into the same section; on blur leave focus be.
+      if (keepFocus) rerender(section, null); else renderComposerChecklist();
+    },
+    // Enter inside an item opens a fresh item on the next line and focuses it.
+    onSplit: (index, text) => {
+      const willAdd = !!text.replace(/[\r\n]+/g, ' ').trim();
+      composerItems = parseChecklist(splitChecklistItem(content(), index, text));
+      if (willAdd) rerender(null, index + 1); else renderComposerChecklist();
+    },
   });
-  composerChecklistEl.appendChild(makeAddItemRow((text, keepFocus) => {
-    const entry = parseAddEntry(text);
-    composerItems.push(entry.heading
-      ? { heading: true, text: entry.text }
-      : { checked: false, text: entry.text });
-    renderComposerChecklist();
-    // Refocus the (re-rendered) add input for fast sequential entry on Enter;
-    // on blur, leave focus where the user clicked.
-    if (keepFocus) {
-      const inp = composerChecklistEl.querySelector('.cl-add-input');
-      if (inp) inp.focus();
-    }
-  }));
 }
 
 // Seed composerItems from whatever the user typed in the plain textarea (so the
