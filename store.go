@@ -1,11 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -106,12 +106,11 @@ func (s *Store) migratePositions(memos []*Memo) {
 		}
 	}
 	ordered := slices.Clone(memos)
-	sort.Slice(ordered, func(i, j int) bool {
-		a, b := ordered[i], ordered[j]
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.Before(b.CreatedAt) // oldest first
+	slices.SortFunc(ordered, func(a, b *Memo) int {
+		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+			return c // oldest first
 		}
-		return a.ID < b.ID
+		return cmp.Compare(a.ID, b.ID)
 	})
 	for i, m := range ordered {
 		m.Position = float64(i + 1)
@@ -125,9 +124,7 @@ func (s *Store) save() error {
 	for _, m := range s.memos {
 		snap.Memos = append(snap.Memos, m)
 	}
-	sort.Slice(snap.Memos, func(i, j int) bool {
-		return snap.Memos[i].ID < snap.Memos[j].ID
-	})
+	slices.SortFunc(snap.Memos, func(a, b *Memo) int { return cmp.Compare(a.ID, b.ID) })
 
 	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
@@ -461,6 +458,18 @@ func (s *Store) Duplicate(id int64) (*Memo, error) {
 	return cloneMemo(m), nil
 }
 
+// boardOrder is the board's visual order within a pin group: higher position
+// first, then newest first, then higher ID first.
+func boardOrder(a, b *Memo) int {
+	if c := cmp.Compare(b.Position, a.Position); c != 0 {
+		return c
+	}
+	if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+		return c
+	}
+	return cmp.Compare(b.ID, a.ID)
+}
+
 // Move reorders a memo within its group. A group is the set of active
 // (non-archived, non-trashed) memos that share the moved memo's Pinned value.
 // The memo is re-inserted immediately after afterID; when afterID is 0 or not in
@@ -482,19 +491,13 @@ func (s *Store) Move(id, afterID int64) (*Memo, error) {
 			group = append(group, other)
 		}
 	}
-	sort.Slice(group, func(i, j int) bool {
-		a, b := group[i], group[j]
-		if a.Position != b.Position {
-			return a.Position > b.Position // higher first
-		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.After(b.CreatedAt) // newest first
-		}
-		return a.ID > b.ID
-	})
+	slices.SortFunc(group, boardOrder)
 
-	// Snapshot positions so we can roll back on save failure.
-	prev := make(map[int64]float64, len(group))
+	// Snapshot positions so we can roll back on save failure. The moved memo is
+	// snapshotted explicitly: it is missing from the group when it is itself
+	// archived or trashed, and would otherwise roll back to position 0.
+	prev := make(map[int64]float64, len(group)+1)
+	prev[m.ID] = m.Position
 	for _, g := range group {
 		prev[g.ID] = g.Position
 	}
@@ -598,18 +601,14 @@ func (s *Store) List(opt ListOptions) ListResult {
 		filtered = append(filtered, m)
 	}
 
-	sort.Slice(filtered, func(i, j int) bool {
-		a, b := filtered[i], filtered[j]
+	slices.SortFunc(filtered, func(a, b *Memo) int {
 		if a.Pinned != b.Pinned {
-			return a.Pinned // pinned memos first
+			if a.Pinned {
+				return -1 // pinned memos first
+			}
+			return 1
 		}
-		if a.Position != b.Position {
-			return a.Position > b.Position // higher position first
-		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.After(b.CreatedAt) // newest first
-		}
-		return a.ID > b.ID
+		return boardOrder(a, b)
 	})
 
 	total := len(filtered)
@@ -668,11 +667,11 @@ func (s *Store) Labels() []LabelInfo {
 	for key, count := range counts {
 		labels = append(labels, LabelInfo{Name: names[key], Count: count})
 	}
-	sort.Slice(labels, func(i, j int) bool {
-		if labels[i].Count != labels[j].Count {
-			return labels[i].Count > labels[j].Count
+	slices.SortFunc(labels, func(a, b LabelInfo) int {
+		if c := cmp.Compare(b.Count, a.Count); c != 0 {
+			return c
 		}
-		return labels[i].Name < labels[j].Name
+		return strings.Compare(a.Name, b.Name)
 	})
 	return labels
 }

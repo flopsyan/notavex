@@ -1,11 +1,12 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"os"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,13 +21,13 @@ var (
 	ErrLastAdmin       = errors.New("cannot remove the last admin account")
 )
 
-// usernameRe matches 2–32 chars of letters, digits and . _ - (same as epulonis).
+// usernameRe matches 2-32 chars of letters, digits and . _ - (same as epulonis).
 var usernameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{2,32}$`)
 
 const maxDisplayName = 64
 
 // User is a single account. Password material (PassHash/PassSalt) is never sent
-// to the browser — use public() for that.
+// to the browser - use public() for that.
 type User struct {
 	ID          int64     `json:"id"`
 	Username    string    `json:"username"`
@@ -109,7 +110,7 @@ func (s *UserStore) save() error {
 	for _, u := range s.users {
 		snap.Users = append(snap.Users, u)
 	}
-	sort.Slice(snap.Users, func(i, j int) bool { return snap.Users[i].ID < snap.Users[j].ID })
+	slices.SortFunc(snap.Users, func(a, b *User) int { return cmp.Compare(a.ID, b.ID) })
 	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return err
@@ -162,8 +163,8 @@ func (s *UserStore) List() []PublicUser {
 	for _, u := range s.users {
 		out = append(out, u.public())
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return strings.ToLower(out[i].Username) < strings.ToLower(out[j].Username)
+	slices.SortFunc(out, func(a, b PublicUser) int {
+		return strings.Compare(strings.ToLower(a.Username), strings.ToLower(b.Username))
 	})
 	return out
 }
