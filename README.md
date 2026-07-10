@@ -1,37 +1,37 @@
 # 📝 Notavex
 
-A tiny, self-hosted notes app with Markdown support — your own private stream of
+A tiny, self-hosted notes app with Markdown support - your own private stream of
 thoughts, tasks and snippets. A **Google Keep-style** board (masonry grid of
 colorful cards) with the Markdown power of
 [Memos](https://github.com/usememos/memos), built to be dead-simple to run and
 to hack on.
 
-- **Single static binary** — written in Go using *only the standard library*.
+- **Single static binary** - written in Go using *only the standard library*.
   No database server, no Node build step, no external services.
-- **One file of data** — every note lives in a single JSON file, so backups are
+- **One file of data** - every note lives in a single JSON file, so backups are
   literally a file copy.
-- **Markdown + tables + checklists** — write in Markdown (incl. GFM tables and
+- **Markdown + tables + checklists** - write in Markdown (incl. GFM tables and
   clickable task lists), with instant full-text search.
-- **Organize like Keep** — optional **titles**, **labels** (added with a button, not
+- **Organize like Keep** - optional **titles**, **labels** (added with a button, not
   `#text`), note **colors**, pinning, **drag-and-drop** reordering, **archive**, a
   **trash**, and "make a copy".
-- **Smart checklists** — turn any note into a to-do list; ticked items sink to the
+- **Smart checklists** - turn any note into a to-do list; ticked items sink to the
   bottom under a collapsible, remembered "completed" section.
-- **Images** — attach pictures from the composer, a card's action row or the editor;
+- **Images** - attach pictures from the composer, a card's action row or the editor;
   they are downscaled in the browser and stored inline (no uploads folder to manage).
-- **Accounts & login** — an optional **login** with user accounts. The first
+- **Accounts & login** - an optional **login** with user accounts. The first
   **admin** is bootstrapped from the environment; further accounts are added in the
   app, where **only admins can create or remove users**. Everyone can change their
   own display name and password under **Account**. Once an account exists a login is
   required and **nothing is shown until you sign in**.
-- **Settings** — a menu for the **color theme** (System / Light / Dark) and
+- **Settings** - a menu for the **color theme** (System / Light / Dark) and
   **language** (English / German); both default to your system and are remembered
   per browser.
-- **Collapsible sidebar** — a Google Keep-style hamburger collapses the sidebar to an
+- **Collapsible sidebar** - a Google Keep-style hamburger collapses the sidebar to an
   icon rail; hover to peek the full labels.
-- **Tiny footprint** — the Docker image is a few MB and runs happily on a
+- **Tiny footprint** - the Docker image is a few MB and runs happily on a
   Raspberry Pi (`amd64` / `arm64` / `armv7`).
-- **Keep-style UI** — a responsive masonry grid of cards, an expanding composer, a
+- **Keep-style UI** - a responsive masonry grid of cards, an expanding composer, a
   full-screen note editor, monochrome icons, light & dark mode, and `Ctrl/⌘ + Enter` to save.
 
 ## Quick start
@@ -105,21 +105,21 @@ last admin, cannot be removed, so you can never lock yourself out.
 
 Everything lives in `NOTAVEX_DATA_DIR`:
 
-- `notavex.json` — all your notes (incl. attached images as inline data), as
+- `notavex.json` - all your notes (incl. attached images as inline data), as
   human-readable JSON, written atomically.
-- `users.json` — the accounts: usernames and **salted PBKDF2 hashes** (never the
+- `users.json` - the accounts: usernames and **salted PBKDF2 hashes** (never the
   passwords themselves). Only present once an account exists.
-- `.secret` — the session signing key.
+- `.secret` - the session signing key.
 
 To back up, copy the data directory somewhere safe. To restore, put it back and
 restart. To **start over with logins**, delete `users.json` and set
-`NOTAVEX_PASSWORD` (and optionally `NOTAVEX_USER`) again — a fresh admin is
+`NOTAVEX_PASSWORD` (and optionally `NOTAVEX_USER`) again - a fresh admin is
 bootstrapped on the next start.
 
 ### Storing the data on a NAS
 
 The data directory is just a folder, so point it at your NAS exactly like you
-would for any other self-hosted app — **bind-mount** a path from the NAS into the
+would for any other self-hosted app - **bind-mount** a path from the NAS into the
 container instead of using a named Docker volume:
 
 ```yaml
@@ -141,7 +141,7 @@ docker run -d --name notavex -p 8080:8080 \
 ```
 
 Make sure the mounted folder is writable by the container user, and prefer a
-local/iSCSI volume over a flaky SMB/NFS share — the store rewrites a single file
+local/iSCSI volume over a flaky SMB/NFS share - the store rewrites a single file
 atomically (write-temp-then-rename), which needs a filesystem that supports
 `rename`. That is the same approach as the sibling *epulonis* project, which
 bind-mounts its `/app/data` (SQLite) folder the same way.
@@ -158,7 +158,7 @@ Notavex has **no authentication until you create an account** (set
 Passwords are kept only as salted PBKDF2 hashes. Sessions are stateless, signed
 cookies (HMAC-SHA256) bound to the user's password hash, so changing a password
 signs that user's other sessions out. Once an account exists the whole app
-requires a login — visitors see only the sign-in screen.
+requires a login - visitors see only the sign-in screen.
 
 For a home-only setup (LAN, VPN, Tailscale) you can leave it open.
 
@@ -240,4 +240,4 @@ obtained from `POST /api/login`; the user-management routes require an admin.
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0 - see [LICENSE](LICENSE).

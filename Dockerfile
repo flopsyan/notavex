@@ -8,7 +8,7 @@
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 
-# No external modules, so this is effectively a no-op — but it keeps the layer
+# No external modules, so this is effectively a no-op - but it keeps the layer
 # cached and makes the intent clear.
 COPY go.mod ./
 RUN go mod download

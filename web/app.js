@@ -1,7 +1,7 @@
 'use strict';
 
 // ===================================================================
-// Notavex — Google Keep-style notes UI
+// Notavex - Google Keep-style notes UI
 // ===================================================================
 
 // ===================================================================
@@ -129,7 +129,7 @@ const STRINGS = {
     remove: 'Remove',
     confirm_delete_user: 'Remove this user?',
     confirm_delete_self: 'Remove your own account? You will be logged out.',
-    err_invalid_username: 'Invalid username (2–32 chars: letters, numbers, . _ -).',
+    err_invalid_username: 'Invalid username (2-32 chars: letters, numbers, . _ -).',
     err_taken: 'Username already taken.',
     err_last_user: 'Cannot remove the last account.',
     err_last_admin: 'Cannot remove the last admin account.',
@@ -244,7 +244,7 @@ const STRINGS = {
     remove: 'Entfernen',
     confirm_delete_user: 'Diesen Benutzer entfernen?',
     confirm_delete_self: 'Dein eigenes Konto entfernen? Du wirst abgemeldet.',
-    err_invalid_username: 'Ungültiger Benutzername (2–32 Zeichen: Buchstaben, Zahlen, . _ -).',
+    err_invalid_username: 'Ungültiger Benutzername (2-32 Zeichen: Buchstaben, Zahlen, . _ -).',
     err_taken: 'Benutzername bereits vergeben.',
     err_last_user: 'Der letzte Account kann nicht entfernt werden.',
     err_last_admin: 'Der letzte Admin-Account kann nicht entfernt werden.',
@@ -317,7 +317,7 @@ let composerImages = []; // data URLs of images attached to the note being draft
 
 let labels = []; // [{name, count}] from /api/labels
 
-let grids = []; // [{ container, cards }] — kept so we can re-layout on resize
+let grids = []; // [{ container, cards }] - kept so we can re-layout on resize
 
 // ---------- DOM refs ----------
 const $ = (s) => document.querySelector(s);
@@ -362,7 +362,7 @@ const othersGrid = $('#others-grid');
 const emptyEl = $('#empty');
 
 // ===================================================================
-// Icons — colorless inline SVGs (Material-Symbols-style outline).
+// Icons - colorless inline SVGs (Material-Symbols-style outline).
 // All use currentColor so theme switching "just works".
 // ===================================================================
 
@@ -488,7 +488,7 @@ function continueListOnEnter(ta) {
     return true;
   }
 
-  // Ordered list — continue the numbering.
+  // Ordered list - continue the numbering.
   m = line.match(/^(\s*)(\d+)([.)])\s+(.*)$/);
   if (m) {
     if (m[4].trim() === '') { spliceTextarea(ta, lineStart, pos, m[1]); return true; }
@@ -511,7 +511,7 @@ function isProtectedClick(e) {
 // set of tags is emitted, and link/image URLs are sanitized).
 // ===================================================================
 
-const PH = String.fromCharCode(0); // placeholder sentinel — cannot occur in user input
+const PH = String.fromCharCode(0); // placeholder sentinel - cannot occur in user input
 
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => (
@@ -548,7 +548,7 @@ function renderInline(text) {
   text = text.replace(/(^|[^_\w])_([^_\s][^_]*?)_(?!\w)/g, '$1<em>$2</em>');
   text = text.replace(/~~([^~]+)~~/g, '<del>$1</del>');
 
-  // Hashtags render as styled spans but are purely visual — labels are explicit
+  // Hashtags render as styled spans but are purely visual - labels are explicit
   // (set via the label UI), never parsed from text.
   text = text.replace(/(^|\s)#([\p{L}\p{N}][\p{L}\p{N}_/-]*)/gu,
     (_, pre, tag) => `${pre}<span class="hashtag">#${tag}</span>`);
@@ -726,11 +726,11 @@ function toggleTaskInContent(content, taskIndex) {
 }
 
 // ===================================================================
-// Checklist model (Phase B) — markdown lines as structured entries. An entry is
+// Checklist model (Phase B) - markdown lines as structured entries. An entry is
 // either an item ({checked, text}, stored "- [ ] x" / "- [x] x") or a subheading
 // ({heading: true, text}, stored "## x"). Subheadings split the list into
 // sections; the canonical order keeps unchecked items first then checked items
-// WITHIN EACH section (a heading-free list is a single section — the original
+// WITHIN EACH section (a heading-free list is a single section - the original
 // global invariant). The pure helpers below preserve that order so the card
 // preview, the modal and a reload always agree. Because content is always stored
 // canonically, document order == display order, so every helper addresses an
@@ -826,7 +826,7 @@ function parseAddEntry(text) {
 }
 
 // Replace the text of the entry at `index` (newlines collapse to spaces). Empty
-// text removes the entry — clearing an item deletes it, Google Keep style.
+// text removes the entry - clearing an item deletes it, Google Keep style.
 function setChecklistEntryText(content, index, text) {
   const entries = parseChecklist(content);
   const e = entries[index];
@@ -863,7 +863,7 @@ function splitChecklistItem(content, index, text) {
 }
 
 // Move the entry at `from` next to the entry at `over` (above it when `before`).
-// Reuses computeReorder for the index math, then re-canonicalizes — so a manual
+// Reuses computeReorder for the index math, then re-canonicalizes - so a manual
 // order among unchecked items sticks while checked items still sink per section.
 function reorderChecklist(content, from, over, before) {
   const entries = parseChecklist(content);
@@ -879,7 +879,7 @@ function reorderChecklist(content, from, over, before) {
 // Given the ordered ids of a section (top -> bottom), the dragged id, and the
 // id it was dropped relative to (`overId`) with `before` = drop above that
 // target, return { ids, afterId } where `ids` is the new top->bottom order and
-// `afterId` is the id immediately ABOVE the dragged card (0 = it lands first) —
+// `afterId` is the id immediately ABOVE the dragged card (0 = it lands first) -
 // exactly what POST /move expects. Returns null for a no-op (unchanged order).
 function computeReorder(orderedIds, draggedId, overId, before) {
   const from = orderedIds.indexOf(draggedId);
@@ -1090,7 +1090,7 @@ function openMenu(anchor, items) {
 }
 
 // ===================================================================
-// Checklist component (Keep-style) — shared by the card preview, the modal
+// Checklist component (Keep-style) - shared by the card preview, the modal
 // and the composer. Renders unchecked items on top, a collapsible "completed"
 // group, and (optionally) an add-item row.
 // ===================================================================
@@ -1100,7 +1100,7 @@ let clDragFrom = null;
 
 // Build checklist rows into `host` from a structured entry array (items and
 // subheadings) in canonical order. Indices passed to the callbacks are entry
-// indices — positions in `entries`, which (because content is stored
+// indices - positions in `entries`, which (because content is stored
 // canonically) equal the rows' top-to-bottom document order.
 //   opts = {
 //     interactive,            // checkboxes are clickable
@@ -1285,7 +1285,7 @@ function buildChecklistRows(host, entries, opts) {
     host.appendChild(row);
   };
 
-  // With subheadings the list renders strictly in document order — items sink
+  // With subheadings the list renders strictly in document order - items sink
   // only within their own section (see buildChecklistContent), so there is no
   // global completed group. Every section gets its own "+ list item" row at its
   // bottom (above the next heading), so any section can grow, not only the last.
@@ -1482,7 +1482,7 @@ async function toggleChecklistCollapse(m) {
 }
 
 // ===================================================================
-// Images — picked from the device, downscaled in the browser to a JPEG data
+// Images - picked from the device, downscaled in the browser to a JPEG data
 // URL (no upload endpoint needed), then stored on the memo as a data URL.
 // ===================================================================
 
@@ -1658,7 +1658,7 @@ function noteCard(m) {
       if (e.target.closest('button,a,input,textarea,.note-actions')) return;
       openModal(m);
     });
-    // Drag-and-drop reordering (active view only — see attachDrag).
+    // Drag-and-drop reordering (active view only - see attachDrag).
     if (state.view === 'active') attachDrag(el, m);
   }
   return el;
@@ -1944,7 +1944,7 @@ function removeImageFromMemo(m, index) {
 }
 
 // ===================================================================
-// Modal editor — click a card to open it large & centered (Keep-style).
+// Modal editor - click a card to open it large & centered (Keep-style).
 // Label / color / pin / archive / trash / checklist toggles persist live via
 // their endpoints; the title and (non-checklist) body persist on close.
 // ===================================================================
@@ -3289,7 +3289,7 @@ async function init() {
 
   // Click-away: commit the composer, close popovers, close the mobile drawer.
   // Clicks on detached nodes or inside a popover are ignored (see the color bug
-  // fix — a swatch can be removed mid-click by an innerHTML reset).
+  // fix - a swatch can be removed mid-click by an innerHTML reset).
   document.addEventListener('click', (e) => {
     if (isProtectedClick(e)) return;
     // While the modal is open the composer is inert behind it; only manage

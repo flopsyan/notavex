@@ -637,7 +637,7 @@ var allowedColors = map[string]bool{
 
 func validColor(c string) bool { return allowedColors[c] }
 
-// imageDataURL matches a base64-encoded image data URL — the only image form the
+// imageDataURL matches a base64-encoded image data URL - the only image form the
 // browser produces. Anything else (e.g. javascript:/http(s): URLs) is rejected so
 // the value is safe to drop straight into an <img src>.
 var imageDataURL = regexp.MustCompile(`^data:image/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$`)

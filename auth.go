@@ -68,7 +68,7 @@ func verifySaltedHash(password, hashHex, saltHex string, iter int) bool {
 
 // Auth issues and validates stateless, signed session cookies for the user store.
 // A session token is "<userID>.<expiryUnix>.<signature>", where the signature
-// binds the user's current password hash — so changing a password invalidates
+// binds the user's current password hash - so changing a password invalidates
 // that user's existing sessions. Authentication is required whenever at least
 // one account exists; with no accounts the app runs open.
 type Auth struct {

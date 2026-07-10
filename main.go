@@ -64,9 +64,9 @@ func main() {
 	}
 
 	if auth.enabled() {
-		log.Printf("authentication: ENABLED — %d account(s); login required.", users.Count())
+		log.Printf("authentication: ENABLED - %d account(s); login required.", users.Count())
 	} else {
-		log.Print("authentication: DISABLED — set NOTAVEX_PASSWORD (and optionally NOTAVEX_USER) " +
+		log.Print("authentication: DISABLED - set NOTAVEX_PASSWORD (and optionally NOTAVEX_USER) " +
 			"to create the admin account and require a login. Do not expose Notavex without it!")
 	}
 
