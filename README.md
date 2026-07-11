@@ -1,4 +1,4 @@
-# 📝 Notavex
+# Notavex
 
 A tiny, self-hosted notes app with Markdown support - your own private stream of
 thoughts, tasks and snippets. A **Google Keep-style** board (masonry grid of
