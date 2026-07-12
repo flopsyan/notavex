@@ -591,6 +591,8 @@ body.modal-open { overflow: hidden; }
 /* Insertion indicator: a line on the side the card will drop. */
 .note.drop-before { box-shadow: 0 -3px 0 -1px #1a73e8, var(--shadow-hover); }
 .note.drop-after { box-shadow: 0 3px 0 -1px #1a73e8, var(--shadow-hover); }
+.note.drop-left { box-shadow: -3px 0 0 -1px #1a73e8, var(--shadow-hover); }
+.note.drop-right { box-shadow: 3px 0 0 -1px #1a73e8, var(--shadow-hover); }
 /* Keep text/inputs/links selectable & clickable inside a draggable card. */
 .note[draggable="true"] input,
 .note[draggable="true"] textarea,

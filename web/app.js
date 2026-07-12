@@ -2311,9 +2311,24 @@ function applyMoveToState(draggedId, afterId) {
   }
 }
 
+const DROP_CLASSES = ['drop-before', 'drop-after', 'drop-left', 'drop-right'];
+
+// The card edge the pointer is nearest, as { before, cls }. Cards can sit side by
+// side in the masonry, so a horizontal lean picks the left/right edge, otherwise
+// top/bottom. `before` = insert ahead of the target in the flat order.
+function dropSide(el, e) {
+  const r = el.getBoundingClientRect();
+  const dx = (e.clientX - (r.left + r.width / 2)) / r.width;
+  const dy = (e.clientY - (r.top + r.height / 2)) / r.height;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return dx < 0 ? { before: true, cls: 'drop-left' } : { before: false, cls: 'drop-right' };
+  }
+  return dy < 0 ? { before: true, cls: 'drop-before' } : { before: false, cls: 'drop-after' };
+}
+
 function clearDropIndicators() {
-  document.querySelectorAll('.note.drop-before, .note.drop-after')
-    .forEach((n) => n.classList.remove('drop-before', 'drop-after'));
+  document.querySelectorAll('.note.drop-before, .note.drop-after, .note.drop-left, .note.drop-right')
+    .forEach((n) => n.classList.remove(...DROP_CLASSES));
 }
 
 function attachDrag(el, m) {
@@ -2345,22 +2360,20 @@ function attachDrag(el, m) {
     if (sectionOf(m) !== dragSection) return; // never across sections
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    const r = el.getBoundingClientRect();
-    const before = e.clientY < r.top + r.height / 2;
-    if (el.classList.contains(before ? 'drop-before' : 'drop-after')) return;
-    el.classList.remove('drop-before', 'drop-after');
-    el.classList.add(before ? 'drop-before' : 'drop-after');
+    const { cls } = dropSide(el, e);
+    if (el.classList.contains(cls)) return;
+    el.classList.remove(...DROP_CLASSES);
+    el.classList.add(cls);
   });
 
   el.addEventListener('dragleave', () => {
-    el.classList.remove('drop-before', 'drop-after');
+    el.classList.remove(...DROP_CLASSES);
   });
 
   el.addEventListener('drop', (e) => {
     if (dragId == null || sectionOf(m) !== dragSection) return;
     e.preventDefault();
-    const r = el.getBoundingClientRect();
-    const before = e.clientY < r.top + r.height / 2;
+    const { before } = dropSide(el, e);
     const moved = dragId;
     clearDropIndicators();
     const res = computeReorder(visibleSectionIds(dragSection), moved, m.id, before);
