@@ -1395,18 +1395,28 @@ function makeAddItemRow(onSubmit) {
   const plus = document.createElement('span');
   plus.className = 'cl-add-ico';
   plus.innerHTML = icon('plus', 18);
-  const input = document.createElement('input');
-  input.type = 'text';
+  // A borderless, auto-growing textarea (not a single-line input) so a long new
+  // entry wraps and grows, matching how existing items read and edit. An item is
+  // one logical line, so newlines are stripped to spaces and Enter commits.
+  const input = document.createElement('textarea');
+  input.rows = 1;
   input.className = 'cl-add-input';
   input.placeholder = t('list_item');
   input.title = t('list_item_hint'); // "## …" starts a subheading
+  input.spellcheck = false;
+  const resize = () => { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; };
   const submit = (keepFocus) => {
-    const text = input.value.trim();
+    const text = input.value.replace(/[\r\n]+/g, ' ').trim();
     if (!text) return;
     input.value = ''; // cleared first, so the removal-induced blur is a no-op
+    resize();
     onSubmit(text, keepFocus);
     if (keepFocus && input.isConnected) input.focus(); // not re-rendered -> keep focus
   };
+  input.addEventListener('input', () => {
+    if (/[\r\n]/.test(input.value)) input.value = input.value.replace(/[\r\n]+/g, ' ');
+    resize();
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); submit(true); }
     e.stopPropagation();
@@ -1415,6 +1425,7 @@ function makeAddItemRow(onSubmit) {
   input.addEventListener('blur', () => submit(false));
   input.addEventListener('click', (e) => e.stopPropagation());
   row.append(plus, input);
+  requestAnimationFrame(resize); // size once it is in the DOM
   return row;
 }
 
