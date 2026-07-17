@@ -670,7 +670,7 @@ function renderMarkdown(src) {
         const task = item.match(/^\[([ xX])\]\s*(.*)$/);
         if (task) {
           const checked = task[1].toLowerCase() === 'x' ? ' checked' : '';
-          items += `<li class="task"><input type="checkbox" data-task="${taskIndex}"${checked}> ${renderInline(escapeHtml(task[2]))}</li>`;
+          items += `<li class="task"><label class="task-tap"><input type="checkbox" data-task="${taskIndex}"${checked}></label> ${renderInline(escapeHtml(task[2]))}</li>`;
           taskIndex++;
         } else {
           items += `<li>${renderInline(escapeHtml(item))}</li>`;
@@ -1218,8 +1218,13 @@ function buildChecklistRows(host, entries, opts) {
     cb.type = 'checkbox';
     cb.className = 'cl-check';
     cb.checked = item.checked;
+    // The label enlarges the tap target on touch devices (padding via CSS);
+    // clicking it activates the checkbox natively.
+    const cbWrap = document.createElement('label');
+    cbWrap.className = 'cl-checkwrap';
+    cbWrap.appendChild(cb);
     if (o.interactive && o.onToggle) {
-      cb.addEventListener('click', (e) => e.stopPropagation());
+      cbWrap.addEventListener('click', (e) => e.stopPropagation());
       cb.addEventListener('change', (e) => { e.stopPropagation(); o.onToggle(entryIndex); });
     } else {
       cb.disabled = true;
@@ -1236,7 +1241,7 @@ function buildChecklistRows(host, entries, opts) {
       textEl.className = 'cl-text';
       textEl.innerHTML = renderInline(escapeHtml(item.text));
     }
-    row.append(cb, textEl);
+    row.append(cbWrap, textEl);
     if (o.showRemove && o.onRemove) {
       row.appendChild(makeRemoveButton(t('delete_item'), () => o.onRemove(entryIndex)));
     }
@@ -1652,7 +1657,7 @@ function noteCard(m) {
   // stopPropagation, so clicking them never bubbles up here.
   if (state.view !== 'trash') {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('button,a,input,textarea,.note-actions')) return;
+      if (e.target.closest('button,a,input,textarea,label,.note-actions')) return;
       openModal(m);
     });
     // Drag-and-drop reordering (active view only - see attachDrag).
