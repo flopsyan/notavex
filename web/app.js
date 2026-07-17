@@ -794,20 +794,6 @@ function toggleChecklistItem(content, index) {
   return buildChecklistContent(entries);
 }
 
-// Append a new unchecked item to the bottom of the LAST section's unchecked run.
-function appendChecklistItem(content, text) {
-  const entries = parseChecklist(content);
-  entries.push({ checked: false, text });
-  return buildChecklistContent(entries);
-}
-
-// Append a new subheading, starting a fresh section at the end of the list.
-function appendChecklistHeading(content, text) {
-  const entries = parseChecklist(content);
-  entries.push({ heading: true, text });
-  return buildChecklistContent(entries);
-}
-
 // Remove the entry (item or heading) at entry-index `index`. Dropping a heading
 // merges its items into the section above.
 function removeChecklistItem(content, index) {
