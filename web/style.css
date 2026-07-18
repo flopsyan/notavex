@@ -404,7 +404,9 @@ a { color: inherit; }
    the glyph at 22px and pad the label wrapper to a ~40px tap target; negative
    margins keep the row layout compact. */
 @media (pointer: coarse) {
-  .cl-item { padding: 6px 0; }
+  /* The enlarged checkbox is much taller than one text line, so flex-start
+     would strand the text at the top - center it against the box instead. */
+  .cl-item { padding: 6px 0; align-items: center; }
   .cl-checkwrap {
     padding: 8px;
     margin: -5px -6px -6px -8px;
