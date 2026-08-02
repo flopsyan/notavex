@@ -16,6 +16,12 @@ var ErrNotFound = errors.New("memo not found")
 
 // Memo is a single note. Labels are explicit (set by the user), never parsed
 // from the text. Position orders the board: higher sorts first (top).
+//
+// A checklist is split into sections by its "## " subheadings, and every
+// section has its own collapsible group of completed items: CompletedCollapsed
+// holds the state of the leading section (the items before the first
+// subheading, i.e. the whole list when it has none), CollapsedSections the
+// subheading texts whose group is collapsed.
 type Memo struct {
 	ID                 int64      `json:"id"`
 	Title              string     `json:"title"`
@@ -28,6 +34,7 @@ type Memo struct {
 	Trashed            bool       `json:"trashed"`
 	Checklist          bool       `json:"checklist"`
 	CompletedCollapsed bool       `json:"completedCollapsed"`
+	CollapsedSections  []string   `json:"collapsedSections,omitempty"`
 	Position           float64    `json:"position"`
 	CreatedAt          time.Time  `json:"createdAt"`
 	UpdatedAt          time.Time  `json:"updatedAt"`
@@ -190,6 +197,9 @@ func cloneMemo(m *Memo) *Memo {
 	}
 	if m.Images != nil {
 		c.Images = slices.Clone(m.Images)
+	}
+	if m.CollapsedSections != nil {
+		c.CollapsedSections = slices.Clone(m.CollapsedSections)
 	}
 	if m.TrashedAt != nil {
 		t := *m.TrashedAt
@@ -367,11 +377,24 @@ func (s *Store) SetTrashed(id int64, trashed bool) (*Memo, error) {
 	})
 }
 
-// SetCompletedCollapsed toggles whether a checklist's completed items are hidden.
-// This does not change UpdatedAt.
-func (s *Store) SetCompletedCollapsed(id int64, collapsed bool) (*Memo, error) {
+// SetCompletedCollapsed toggles whether the completed items of one checklist
+// section are hidden. section is the text of the section's subheading; "" is
+// the leading section (a list without subheadings is exactly that section).
+// Sections that share a subheading text share their state. This does not change
+// UpdatedAt.
+func (s *Store) SetCompletedCollapsed(id int64, section string, collapsed bool) (*Memo, error) {
 	return s.mutate(id, func(m *Memo) error {
-		m.CompletedCollapsed = collapsed
+		if section == "" {
+			m.CompletedCollapsed = collapsed
+			return nil
+		}
+		// New slices, never in-place edits, so mutate's rollback stays correct.
+		i := slices.Index(m.CollapsedSections, section)
+		if collapsed && i < 0 {
+			m.CollapsedSections = append(slices.Clone(m.CollapsedSections), section)
+		} else if !collapsed && i >= 0 {
+			m.CollapsedSections = slices.Delete(slices.Clone(m.CollapsedSections), i, i+1)
+		}
 		return nil
 	})
 }
@@ -443,6 +466,7 @@ func (s *Store) Duplicate(id int64) (*Memo, error) {
 		Color:              src.Color,
 		Checklist:          src.Checklist,
 		CompletedCollapsed: src.CompletedCollapsed,
+		CollapsedSections:  slices.Clone(src.CollapsedSections),
 		Position:           s.maxPosition() + 1,
 		CreatedAt:          now,
 		UpdatedAt:          now,

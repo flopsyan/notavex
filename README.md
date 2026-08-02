@@ -16,7 +16,8 @@ to hack on.
   `#text`), note **colors**, pinning, **drag-and-drop** reordering, **archive**, a
   **trash**, and "make a copy".
 - **Smart checklists** - turn any note into a to-do list; ticked items sink to the
-  bottom under a collapsible, remembered "completed" section.
+  bottom under a collapsible, remembered "completed" section. Split a list with
+  `## ` subheadings and every section gets its own sinking and folding.
 - **Images** - attach pictures from the composer, a card's action row or the editor;
   they are downscaled in the browser and stored inline (no uploads folder to manage).
 - **Accounts & login** - an optional **login** with user accounts. The first
@@ -233,7 +234,7 @@ obtained from `POST /api/login`; the user-management routes require an admin.
 | `POST`   | `/api/memos/{id}/trash`     | Move to trash / restore (`{trashed}`). |
 | `POST`   | `/api/memos/{id}/duplicate` | Make a copy.                         |
 | `POST`   | `/api/memos/{id}/move`      | Reorder within its group (`{afterId}`, `0` = top). |
-| `POST`   | `/api/memos/{id}/collapsed` | Remember a checklist's "completed" collapse (`{collapsed}`). |
+| `POST`   | `/api/memos/{id}/collapsed` | Remember one checklist section's "completed" collapse (`{collapsed, section?}`; `section` is a subheading's text, omitted/`""` = the part above the first subheading). |
 | `POST`   | `/api/memos/trash/empty`    | Permanently empty the trash.         |
 | `GET`    | `/api/labels`               | Labels with usage counts.            |
 | `GET`    | `/api/stats`                | `{ notes, archived, trashed, labels }`. |

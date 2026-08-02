@@ -285,6 +285,56 @@ func TestArchiveUnpins(t *testing.T) {
 	}
 }
 
+func TestCompletedCollapsePerSection(t *testing.T) {
+	s := newTestStore(t)
+	m := create(t, s, "packing")
+
+	// "" is the leading section (a list without subheadings): the plain flag.
+	m, err := s.SetCompletedCollapsed(m.ID, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.CompletedCollapsed || len(m.CollapsedSections) != 0 {
+		t.Errorf("leading section: collapsed=%v sections=%v", m.CompletedCollapsed, m.CollapsedSections)
+	}
+
+	// Subheading sections fold one by one, without disturbing each other.
+	if _, err := s.SetCompletedCollapsed(m.ID, "from Ingolstadt", true); err != nil {
+		t.Fatal(err)
+	}
+	if m, err = s.SetCompletedCollapsed(m.ID, "from Regensburg", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.CollapsedSections) != 2 {
+		t.Fatalf("collapsedSections = %v, want both", m.CollapsedSections)
+	}
+	// Collapsing an already collapsed section must not duplicate the entry.
+	if m, err = s.SetCompletedCollapsed(m.ID, "from Regensburg", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.CollapsedSections) != 2 {
+		t.Errorf("collapsedSections = %v, want no duplicate", m.CollapsedSections)
+	}
+
+	if m, err = s.SetCompletedCollapsed(m.ID, "from Ingolstadt", false); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.CollapsedSections) != 1 || m.CollapsedSections[0] != "from Regensburg" {
+		t.Errorf("collapsedSections = %v, want [from Regensburg]", m.CollapsedSections)
+	}
+	if !m.CompletedCollapsed {
+		t.Error("the leading section lost its collapse")
+	}
+
+	// Unfolding an already open section is a no-op, not an error.
+	if m, err = s.SetCompletedCollapsed(m.ID, "from Ingolstadt", false); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.CollapsedSections) != 1 {
+		t.Errorf("collapsedSections = %v, want unchanged", m.CollapsedSections)
+	}
+}
+
 func TestDuplicateMakesIndependentCopyOnTop(t *testing.T) {
 	s := newTestStore(t)
 	orig, err := s.Create(NewMemo{Title: "orig", Content: "body", Labels: []string{"l1"}, Color: "mint", Checklist: true})

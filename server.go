@@ -69,7 +69,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/memos/{id}/trash", s.requireAuth(s.handleMemoFlag("trashed", s.store.SetTrashed)))
 	mux.HandleFunc("POST /api/memos/{id}/duplicate", s.requireAuth(s.handleDuplicateMemo))
 	mux.HandleFunc("POST /api/memos/{id}/move", s.requireAuth(s.handleMoveMemo))
-	mux.HandleFunc("POST /api/memos/{id}/collapsed", s.requireAuth(s.handleMemoFlag("collapsed", s.store.SetCompletedCollapsed)))
+	mux.HandleFunc("POST /api/memos/{id}/collapsed", s.requireAuth(s.handleSetCollapsed))
 	mux.HandleFunc("GET /api/labels", s.requireAuth(s.handleLabels))
 	mux.HandleFunc("GET /api/stats", s.requireAuth(s.handleStats))
 
@@ -510,7 +510,7 @@ func (s *Server) handleDeleteMemo(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMemoFlag builds a handler for the single-bool memo actions (pin,
-// archive, trash, collapsed): it decodes {<field>: bool} and applies it.
+// archive, trash): it decodes {<field>: bool} and applies it.
 func (s *Server) handleMemoFlag(field string, apply func(id int64, v bool) (*Memo, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := pathID(w, r)
@@ -528,6 +528,29 @@ func (s *Server) handleMemoFlag(field string, apply func(id int64, v bool) (*Mem
 		}
 		writeJSON(w, http.StatusOK, m)
 	}
+}
+
+// handleSetCollapsed remembers whether one checklist section's completed group
+// is folded away. "section" is the section's subheading text; omitted or empty
+// means the leading section (the whole list when it has no subheadings).
+func (s *Server) handleSetCollapsed(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Section   string `json:"section"`
+		Collapsed bool   `json:"collapsed"`
+	}
+	if !readJSON(w, r, &req, 4096) {
+		return
+	}
+	m, err := s.store.SetCompletedCollapsed(id, req.Section, req.Collapsed)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
 }
 
 func (s *Server) handleSetColor(w http.ResponseWriter, r *http.Request) {

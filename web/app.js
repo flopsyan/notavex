@@ -1091,13 +1091,13 @@ let clDragFrom = null;
 //   opts = {
 //     interactive,            // checkboxes are clickable
 //     editable,               // text becomes editable fields + drag handles
-//     collapsed,              // completed group collapsed? (heading-free lists)
+//     isCollapsed(sectionKey),// is that section's completed group folded?
 //     showRemove,             // show a hover × on each row
 //     onToggle(index),
 //     onRemove(index),
 //     onEdit(index, text),    // committed item/heading text (editable only)
 //     onMove(from, over, before), // drag-reorder (editable only)
-//     onCollapse(),           // header click (omit to make header inert)
+//     onCollapse(sectionKey), // header click (omit to make header inert)
 //   }
 function buildChecklistRows(host, entries, opts) {
   const o = opts || {};
@@ -1276,45 +1276,13 @@ function buildChecklistRows(host, entries, opts) {
     host.appendChild(row);
   };
 
-  // With subheadings the list renders strictly in document order - items sink
-  // only within their own section (see buildChecklistContent), so there is no
-  // global completed group. Every section gets its own "+ list item" row at its
-  // bottom (above the next heading), so any section can grow, not only the last.
-  // A heading-free list keeps the classic layout: unchecked on top, then a
-  // collapsible "completed" group, with a single add row underneath.
-  if (entries.some((e) => e.heading)) {
-    let ordinal = 0;
-    let hasItems = false;
-    let openedByHeading = false; // this section was started by a heading
-    const closeSection = (insertIndex) => {
-      if (hasItems || openedByHeading) addRow(insertIndex, ordinal);
-      ordinal += 1;
-      hasItems = false;
-      openedByHeading = false;
-    };
-    entries.forEach((e, i) => {
-      if (e.heading) {
-        closeSection(i); // add row for the section that just ended, above this heading
-        host.appendChild(makeHeadingRow(e, i));
-        openedByHeading = true;
-      } else {
-        host.appendChild(makeItemRow(e, i));
-        hasItems = true;
-      }
-    });
-    closeSection(entries.length);
-    return;
-  }
-
-  entries.forEach((item, i) => { if (!item.checked) host.appendChild(makeItemRow(item, i)); });
-
-  const checkedIdx = [];
-  entries.forEach((item, i) => { if (item.checked) checkedIdx.push(i); });
-  if (checkedIdx.length) {
+  // The collapsible "N completed items" header plus its group, for one section.
+  const addCompletedGroup = (sectionKey, checkedIdx) => {
+    const collapsed = o.isCollapsed ? !!o.isCollapsed(sectionKey) : false;
     const header = document.createElement('div');
     header.className = 'cl-completed-head' + (o.onCollapse ? ' is-clickable' : '');
     const chev = document.createElement('span');
-    chev.className = 'cl-chevron' + (o.collapsed ? '' : ' is-open');
+    chev.className = 'cl-chevron' + (collapsed ? '' : ' is-open');
     chev.innerHTML = icon('chevron', 18);
     const label = document.createElement('span');
     label.className = 'cl-completed-label';
@@ -1323,26 +1291,59 @@ function buildChecklistRows(host, entries, opts) {
       : t('completed_many', { n: checkedIdx.length });
     header.append(chev, label);
     if (o.onCollapse) {
-      header.addEventListener('click', (e) => { e.stopPropagation(); o.onCollapse(); });
+      header.addEventListener('click', (e) => { e.stopPropagation(); o.onCollapse(sectionKey); });
     }
     host.appendChild(header);
 
-    if (!o.collapsed) {
-      const group = document.createElement('div');
-      group.className = 'cl-completed-group';
-      checkedIdx.forEach((i) => group.appendChild(makeItemRow(entries[i], i)));
-      host.appendChild(group);
-    }
-  }
+    if (collapsed) return;
+    const group = document.createElement('div');
+    group.className = 'cl-completed-group';
+    checkedIdx.forEach((i) => group.appendChild(makeItemRow(entries[i], i)));
+    host.appendChild(group);
+  };
 
-  // Single add row for the one (heading-free) section, below the completed group.
-  addRow(entries.length, 0);
+  // Subheadings split the list into sections: everything above the first one is
+  // the leading section (key ""), then one section per subheading (keyed by its
+  // text); a list without subheadings is just that leading section. Items sink
+  // only within their own section (see buildChecklistContent), so each section
+  // renders its unchecked items, then its OWN collapsible completed group, then
+  // its "+ list item" row - every section folds and grows on its own.
+  const sections = [{ key: '', headIndex: -1, items: [] }];
+  entries.forEach((e, i) => {
+    if (e.heading) sections.push({ key: e.text, headIndex: i, items: [] });
+    else sections[sections.length - 1].items.push(i);
+  });
+
+  sections.forEach((sec, ordinal) => {
+    // A list starting with a subheading has an empty leading section: skip it,
+    // but keep its ordinal so the add rows below stay addressable by section.
+    if (sec.headIndex < 0 && !sec.items.length && sections.length > 1) return;
+    if (sec.headIndex >= 0) host.appendChild(makeHeadingRow(entries[sec.headIndex], sec.headIndex));
+    const checkedIdx = [];
+    sec.items.forEach((i) => {
+      if (entries[i].checked) checkedIdx.push(i);
+      else host.appendChild(makeItemRow(entries[i], i));
+    });
+    if (checkedIdx.length) addCompletedGroup(sec.key, checkedIdx);
+    // The add row appends to this section: right above the next subheading, or
+    // at the very end of the list for the last section.
+    const next = sections[ordinal + 1];
+    addRow(next ? next.headIndex : entries.length, ordinal);
+  });
+}
+
+// Is the completed group of the section `key` folded away? The leading section
+// ("") uses the memo's completedCollapsed flag, every subheading section its own
+// entry in collapsedSections (keyed by heading text, so the state follows a
+// section when the list is restructured and resets when its heading is renamed).
+function isSectionCollapsed(m, key) {
+  return key ? (m.collapsedSections || []).includes(key) : !!m.completedCollapsed;
 }
 
 // renderChecklist(m, {interactive}) -> the checklist body for a memo.
 // Toggling a checkbox auto-sinks (toggleChecklistItem) and persists via
-// PUT {content}; the completed-group header persists collapse via /collapsed.
-// `extra` adds the modal-only affordances: {showAdd, showRemove}.
+// PUT {content}; a completed-group header persists its section's collapse via
+// /collapsed. `extra` adds the modal-only affordances: {showAdd, showRemove}.
 function renderChecklist(m, { interactive } = {}, extra = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'note-checklist';
@@ -1351,13 +1352,13 @@ function renderChecklist(m, { interactive } = {}, extra = {}) {
   buildChecklistRows(wrap, items, {
     interactive,
     editable: !!extra.editable,
-    collapsed: !!m.completedCollapsed,
+    isCollapsed: (key) => isSectionCollapsed(m, key),
     showRemove: !!extra.showRemove,
     onToggle: interactive ? (index) => toggleChecklistAt(m, index) : null,
     onRemove: extra.showRemove ? (index) => removeChecklistAt(m, index) : null,
     onEdit: extra.editable ? (index, text) => editChecklistAt(m, index, text) : null,
     onMove: extra.editable ? (from, over, before) => reorderChecklistAt(m, from, over, before) : null,
-    onCollapse: interactive ? () => toggleChecklistCollapse(m) : null,
+    onCollapse: interactive ? (key) => toggleChecklistCollapse(m, key) : null,
     // Each section carries its own add row (built by buildChecklistRows). On
     // Enter, remember which one to re-focus after the async persist for fast
     // sequential entry; on blur, leave focus where the click went.
@@ -1473,10 +1474,12 @@ function reorderChecklistAt(m, from, over, before) {
   persistChecklistContent(cur, reorderChecklist(cur.content, from, over, before));
 }
 
-async function toggleChecklistCollapse(m) {
+// Fold or unfold one section's completed group ("" = the leading section).
+async function toggleChecklistCollapse(m, key) {
   const cur = liveMemo(m);
   try {
-    const upd = await api('POST', `/memos/${cur.id}/collapsed`, { collapsed: !cur.completedCollapsed });
+    const upd = await api('POST', `/memos/${cur.id}/collapsed`,
+      { section: key || '', collapsed: !isSectionCollapsed(cur, key) });
     patchMemo(upd);
     rebuildCard(upd);
     if (modalMemo && modalMemo.id === upd.id) refreshModalBody(upd);
@@ -2614,7 +2617,7 @@ function renderComposerChecklist() {
   buildChecklistRows(composerChecklistEl, composerItems, {
     interactive: true,
     editable: true,
-    collapsed: false,
+    isCollapsed: () => false, // nothing to remember a fold on until the note exists
     showRemove: true,
     onToggle: (index) => {
       composerItems = parseChecklist(toggleChecklistItem(content(), index));

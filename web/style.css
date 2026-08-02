@@ -458,6 +458,9 @@ a { color: inherit; }
   user-select: none;
 }
 .cl-completed-head.is-clickable { cursor: pointer; }
+/* A section whose items are all ticked puts the header right under its
+   subheading - one divider there is enough, two would read as an empty band. */
+.cl-heading + .cl-completed-head { margin-top: 2px; border-top: none; }
 .cl-chevron { display: inline-flex; align-items: center; transition: transform .15s; }
 .cl-chevron:not(.is-open) { transform: rotate(-90deg); }
 .cl-completed-group { padding-top: 2px; }
