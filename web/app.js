@@ -444,9 +444,22 @@ function formatRelative(iso) {
   return d.toLocaleDateString(lang, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// Grow a textarea to fit its content. Measuring that needs one layout pass at
+// `height: auto`, which collapses the field to its `rows` height - and for that
+// pass whatever scrolls it is shorter, so the browser clamps the scroll offset
+// before the real height is back. Restoring the height afterwards does not undo
+// that clamp, which is why a long note jumped to the top of the modal (or of the
+// page, in the composer) on every Enter. So remember every offset above the
+// field and put it back. Only containers actually scrolled down can lose
+// anything, so those are the only ones worth touching.
 function autosize(ta) {
+  const scrolled = [];
+  for (let el = ta.parentElement; el; el = el.parentElement) {
+    if (el.scrollTop) scrolled.push([el, el.scrollTop]);
+  }
   ta.style.height = 'auto';
   ta.style.height = ta.scrollHeight + 'px';
+  scrolled.forEach(([el, top]) => { if (el.scrollTop !== top) el.scrollTop = top; });
 }
 
 // Replace the textarea's [from, to) range with `text`, leaving the caret at the
@@ -1129,7 +1142,7 @@ function buildChecklistRows(host, entries, opts) {
     ta.spellcheck = false;
     let committed = initial.trim();
     let handledByEnter = false; // Enter already committed/split this field
-    const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+    const resize = () => autosize(ta);
     ta.addEventListener('input', () => {
       if (/[\r\n]/.test(ta.value)) ta.value = ta.value.replace(/[\r\n]+/g, ' ');
       resize();
@@ -1396,7 +1409,7 @@ function makeAddItemRow(onSubmit) {
   input.placeholder = t('list_item');
   input.title = t('list_item_hint'); // "## …" starts a subheading
   input.spellcheck = false;
-  const resize = () => { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; };
+  const resize = () => autosize(input);
   const submit = (keepFocus) => {
     const text = input.value.replace(/[\r\n]+/g, ' ').trim();
     if (!text) return;
