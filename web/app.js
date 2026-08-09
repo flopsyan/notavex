@@ -1376,7 +1376,9 @@ function renderChecklist(m, { interactive } = {}, extra = {}) {
     // Enter, remember which one to re-focus after the async persist for fast
     // sequential entry; on blur, leave focus where the click went.
     onAdd: extra.showAdd ? (index, section, text, keepFocus) => {
-      if (keepFocus) modalAddFocusSection = section;
+      // A "## …" entry opens a new section directly below this one, so carry on
+      // in that section's add row - it is the first field under the new heading.
+      if (keepFocus) modalAddFocusSection = parseAddEntry(text).heading ? section + 1 : section;
       addChecklistItemAt(m, index, text);
     } : null,
     // Enter inside an item opens a fresh item on the next line; focus it after.
@@ -2653,8 +2655,10 @@ function renderComposerChecklist() {
       const entry = parseAddEntry(text);
       composerItems = parseChecklist(insertChecklistEntry(content(), index,
         entry.heading ? { heading: true, text: entry.text } : { checked: false, text: entry.text }));
-      // On Enter keep entering into the same section; on blur leave focus be.
-      if (keepFocus) rerender(section, null); else renderComposerChecklist();
+      // On Enter keep entering: in the same section, or in the one a new "## …"
+      // subheading just opened below it. On blur leave focus be.
+      if (keepFocus) rerender(entry.heading ? section + 1 : section, null);
+      else renderComposerChecklist();
     },
     // Enter inside an item opens a fresh item on the next line and focuses it.
     onSplit: (index, text) => {
