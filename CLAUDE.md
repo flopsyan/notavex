@@ -1,11 +1,9 @@
 # Notavex
 
-The project knowledge and working rules for this repo live in Florian's
-second-brain vault, as the single source of truth. Read that note before
-working on this repo.
+The project knowledge and working rules for this repo live in Florian's Coding agent,
+as the single source of truth. Read that note before working on this repo.
 
-- Vault note: `03 Areas/Self-Hosted Apps/Notavex.md`
-- Locally (sibling repo): `../second_brain/03 Areas/Self-Hosted Apps/Notavex.md`
-- Vault repo: https://github.com/flopsyan/second_brain
+- Note: `Apps/Notavex.md` in the Coding agent repo
+- Locally: `~/Documents/Git/Lab/coding/Apps/Notavex.md`
 
-If the vault is not available, ask Florian before proceeding.
+If the note is not available, ask Florian before proceeding.
